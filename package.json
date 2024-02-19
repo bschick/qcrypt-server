@@ -1,0 +1,24 @@
+{
+  "name": "qcrypt-server",
+  "version": "1.0.0",
+  "description": "Backend authentication servers for quick crypt",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "esbuild --bundle --format=cjs --platform=node --target=es2022 --outdir=build src/index.ts && rm ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js",
+    "buildmin": "esbuild --bundle --format=cjs --minify --platform=node --target=es2022 --outdir=build src/index.ts && rm ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@simplewebauthn/types": "^9.0.1",
+    "@types/node": "^20.11.16",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.511.0",
+    "@simplewebauthn/server": "^9.0.1",
+    "electrodb": "^2.13.1"
+  }
+}
