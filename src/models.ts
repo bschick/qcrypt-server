@@ -16,10 +16,14 @@ const Users = new Entity(
       },
       attributes: {
          userId: {
-            type: "number",
+            type: "string",
             required: true
          },
          userName: {
+            type: "string",
+            required: true
+         },
+         siteKey: {
             type: "string",
             required: true
          },
@@ -28,22 +32,10 @@ const Users = new Entity(
             default: () => false,
             required: true
          },
-         key: {
-            type: "string",
-            required: false
-         },
          createdAt: {
             type: "number",
             default: () => Date.now(),
             // cannot be modified after created
-            readOnly: true
-         },
-         updatedAt: {
-            type: "number",
-            // watch for changes to any attribute
-            watch: "*",
-            // set current timestamp when updated
-            set: () => Date.now(),
             readOnly: true
          }
       },
@@ -51,13 +43,8 @@ const Users = new Entity(
          byUserId: {
             pk: {
                field: "pk",
-               cast: "number",
-               composite: ["userId"]
-            },
-            sk: {
-               field: "sk",
                cast: "string",
-               composite: ["userName"]
+               composite: ["userId"]
             }
          },
       }
@@ -77,15 +64,11 @@ const Authenticators = new Entity(
          service: "quickcrypt"
       },
       attributes: {
-         credentialId: {
+         userId: {
             type: "string",
             required: true
          },
-         userId: {
-            type: "number",
-            required: true
-         },
-         siteKey: {
+         credentialId: {
             type: "string",
             required: true
          },
@@ -131,21 +114,13 @@ const Authenticators = new Entity(
             default: () => Date.now(),
             // cannot be modified after created
             readOnly: true
-         },
-         updatedAt: {
-            type: "number",
-            // watch for changes to any attribute
-            watch: "*",
-            // set current timestamp when updated
-            set: () => Date.now(),
-            readOnly: true
          }
       },
       indexes: {
          byUserId: {
             pk: {
                field: "pk",
-               cast: "number",
+               cast: "string",
                composite: ["userId"]
             },
             sk: {
@@ -154,13 +129,13 @@ const Authenticators = new Entity(
                composite: ["credentialId"]
             }
          },
-         byCredId: {
+/*         byCredId: {
             index: "cidpk-index",
             pk: {
                field: "cidpk",
                composite: ["credentialId"],
             },
-         }
+         }*/
       }
    },
    {
@@ -181,10 +156,11 @@ const Challenges = new Entity(
             type: "string",
             required: true
          },
-         createdAt: {
+         expiresAt: {
             type: "number",
-            default: () => Date.now(),
-            // cannot be modified after created
+            // Needs unix time (convert from MS to S) and add 5 minutes after creation
+            // Which is a 4 minute buffer since webauthn stuff defaults to 1 minute timeout
+            default: () => (Math.floor(Date.now() / 1000) + 300),
             readOnly: true
          }
       },
@@ -204,6 +180,44 @@ const Challenges = new Entity(
    }
 );
 
+const AAGUIDs = new Entity(
+   {
+      model: {
+         entity: "aaguid",
+         version: "1",
+         service: "quickcrypt"
+      },
+      attributes: {
+         aaguid: {
+            type: "string",
+            required: true
+         },
+         name: {
+            type: "string",
+            required: true
+         },
+         lightIcon: {
+            type: "string",
+            required: true
+         }
+      },
+      indexes: {
+         byAAGUID: {
+            pk: {
+               field: "pk",
+               cast: "string",
+               composite: ["aaguid"]
+            }
+         }
+      }
+   },
+   {
+      table: "QuickCryptAAGUIDs",
+      client: client
+   }
+);
+
+exports.AAGUIDs = AAGUIDs;
 exports.Users = Users;
 exports.Authenticators = Authenticators;
 exports.Challenges = Challenges;

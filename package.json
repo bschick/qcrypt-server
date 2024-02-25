@@ -5,7 +5,7 @@
   "main": "index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "esbuild --bundle --format=cjs --platform=node --target=es2022 --outdir=build src/index.ts && rm ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js",
+    "build": "esbuild --bundle --format=cjs --platform=node --target=es2022 --outdir=build src/index.ts && rm ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js ./assets/combined_aaguid.json",
     "buildmin": "esbuild --bundle --format=cjs --minify --platform=node --target=es2022 --outdir=build src/index.ts && rm ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js"
   },
   "author": "",

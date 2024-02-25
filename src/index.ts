@@ -5,8 +5,11 @@ const {
    verifyRegistrationResponse,
 } = require('@simplewebauthn/server');
 const { Buffer } = require("node:buffer");
-const { Users, Authenticators, Challenges } = require("./models.ts");
+const { Users, Authenticators, Challenges, AAGUIDs } = require("./models.ts");
 const crypto = require('crypto').webcrypto;
+const { readFile } = require('node:fs/promises');
+const { resolve } = require('node:path');
+const { setTimeout } = require('node:timers/promises');
 
 import { type EntityItem } from 'electrodb';
 type UserItem = EntityItem<typeof Users>;
@@ -17,15 +20,6 @@ type QParams = {
    [key: string]: string;
 }
 
-function bytesToNum(arr: Uint8Array): number {
-   let num = 0;
-   for (let i = arr.length - 1; i >= 0; --i) {
-      num = num * 256 + arr[i];
-   }
-   return num;
-}
-
-
 const RPNAME = 'Quick Crypt';
 const RPID = 't1.schicks.net';
 const ORIGIN = `https://${RPID}:4200`;
@@ -33,66 +27,6 @@ const ALGIDS = [24, 7, 3, 1, -7, -257];
 
 class ParamError extends Error {
 }
-
-
-class Random32 {
-   private trueRandCache: Promise<Response>;
-
-   constructor() {
-      this.trueRandCache = this.downloadTrueRand();
-      console.log('made it back');
-   }
-
-   async getRandomArray(
-      trueRand: boolean = true,
-      fallback: boolean = true
-   ): Promise<Uint8Array> {
-      if (!trueRand) {
-         if (!fallback) {
-            throw new Error('both trueRand and fallback disabled');
-         }
-         return crypto.getRandomValues(new Uint8Array(32));
-      } else {
-         const lastCache = this.trueRandCache;
-         this.trueRandCache = this.downloadTrueRand();
-         return lastCache.then((response) => {
-            if (!response.ok) {
-               throw new Error('random.org response: ' + response.statusText);
-            }
-            return response.arrayBuffer();
-         }).then((array) => {
-            if (array.byteLength != 32) {
-               throw new Error('missing bytes from random.org');
-            }
-            return new Uint8Array(array!);
-         }).catch((err) => {
-            console.error(err);
-            // If pseudo random fallback is disabled, then throw error
-            if (!fallback) {
-               throw new Error('no connection to random.org and no fallback: ' + err.message);
-            }
-            return crypto.getRandomValues(new Uint8Array(32));
-         });
-      }
-   }
-
-   async downloadTrueRand(): Promise<Response> {
-      const url = 'https://www.random.org/cgi-bin/randbyte?nbytes=' + 32;
-      try {
-         const p = fetch(url, {
-            cache: 'no-store',
-         });
-         return p;
-      } catch (err) {
-         // According to the docs, this should not happend but it seems to sometimes
-         // (perfhaps just one nodejs, but not sure)
-         console.error('wtf fetch, ', err);
-         return Promise.reject();
-      }
-   }
-}
-
-const random32 = new Random32();
 
 function base64UrlEncode(bytes: Uint8Array | undefined): string | undefined {
    return bytes ? Buffer.from(bytes).toString('base64Url') : undefined;
@@ -121,8 +55,7 @@ async function verifyAuthentication(params: QParams, bodyStr: string): Promise<s
    }
 
    const user = await Users.get({
-      userId: Number(body.response.userHandle),
-      userName: 'brad@schicks.net' // hard-code until remove username
+      userId: body.response.userHandle
    }).go();
 
    console.log("user ", user);
@@ -141,7 +74,8 @@ async function verifyAuthentication(params: QParams, bodyStr: string): Promise<s
       throw new ParamError('challenge not valid');
    }
 
-   Challenges.delete({
+   // should not have to wait, but njs can exit if we don't
+   await Challenges.delete({
       challenge: body.challenge
    }).go();
 
@@ -151,7 +85,7 @@ async function verifyAuthentication(params: QParams, bodyStr: string): Promise<s
    }
 
    const authenticator = await Authenticators.get({
-      userId: Number(user.data.userId),
+      userId: user.data.userId,
       credentialId: body.id
    }).go();
 
@@ -188,10 +122,14 @@ async function verifyAuthentication(params: QParams, bodyStr: string): Promise<s
    let response = {
       verified: verification.verified,
       siteKey: (undefined as string | undefined),
+      userId: (undefined as string | undefined),
+      userName: (undefined as string | undefined),
    };
 
    if (verification.verified) {
-      response.siteKey = authenticator.data.siteKey;
+      response.siteKey = user.data.siteKey;
+      response.userId = user.data.userId;
+      response.userName = user.data.userName;
    }
 
    return JSON.stringify(response);
@@ -201,15 +139,14 @@ async function verifyRegistration(params: QParams, bodyStr: string): Promise<str
    const body = JSON.parse(bodyStr);
 
    if (!body.userId) {
-      throw new ParamError('missing userId or userName');
+      throw new ParamError('missing userId');
    }
    if (!body.challenge) {
       throw new ParamError('missing challenge reply');
    }
 
    const user = await Users.get({
-      userId: Number(body.userId),
-      userName: 'brad@schicks.net'
+      userId: body.userId,
    }).go();
 
    console.log("user ", user);
@@ -228,7 +165,8 @@ async function verifyRegistration(params: QParams, bodyStr: string): Promise<str
       throw new ParamError('challenge not valid');
    }
 
-   Challenges.delete({
+   // should not have to wait, but njs can exit if we don't
+   await Challenges.delete({
       challenge: body.challenge
    }).go();
 
@@ -253,7 +191,9 @@ async function verifyRegistration(params: QParams, bodyStr: string): Promise<str
 
    let response = {
       verified: verification.verified,
-      siteKey: (undefined as string | undefined)
+      siteKey: (undefined as string | undefined),
+      lightIcon: (undefined as string | undefined),
+      description: (undefined as string | undefined)
    };
 
    if (verification.verified) {
@@ -268,13 +208,13 @@ async function verifyRegistration(params: QParams, bodyStr: string): Promise<str
          origin
       } = verification.registrationInfo;
 
-      const siteKey = await random32.getRandomArray();
-      const b64Key = base64UrlEncode(siteKey);
-      response.siteKey = b64Key;
+      const aaguidDetails = AAGUIDs.get({
+         aaguid: aaguid
+      }).go();
 
       const auth = await Authenticators.create({
          userId: user.data.userId,
-         siteKey: b64Key,
+         description: aaguidDetails.data.name ?? 'unknown',
          credentialId: base64UrlEncode(credentialID),
          credentialPublicKey: base64UrlEncode(credentialPublicKey),
          credentialDeviceType: credentialDeviceType,
@@ -286,12 +226,16 @@ async function verifyRegistration(params: QParams, bodyStr: string): Promise<str
          attestationObject: base64UrlEncode(attestationObject),
       }).go();
 
-      Users.patch({
+
+      await Users.patch({
          userId: user.data.userId,
-         userName: user.data.userName
       }).set({
          verified: true
       }).go();
+
+      response.siteKey = user.data.siteKey;
+      response.description = aaguidDetails.data.name ?? 'unknown';
+      response.lightIcon = aaguidDetails.data.lightIcon;
    }
 
    console.log("verification ", verification);
@@ -300,32 +244,31 @@ async function verifyRegistration(params: QParams, bodyStr: string): Promise<str
 
 async function authenticationOptions(params: QParams, body: string): Promise<string> {
 
-   let allowedCreds = undefined;
-
    // If no userid is provided, then we don't return allowed creds and
    // the user if forced to pick one on their own. That happens when the user is
    // linked a new device to a existing passkey
+   let allowedCreds = undefined;
+
    if (params.userid) {
       const user = await Users.get({
-         userId: Number(params.userid),
-         userName: 'brad@schicks.net'
+         userId: params.userid,
       }).go();
 
       console.log("user ", user);
       if (!user || !user.data) {
-         // This lets people userid + username, but userid is 48bits
-         // along with minimum of 10 character username is 128bits
+         // Callers could use this to guess userid, but userid is 128bits psuedo-random, 
+         // so it would take an eternity (and size-large aws bills for me)
          throw new ParamError('user not found')
       }
 
       const auths = await Authenticators.query.byUserId({
-         userId: Number(user.data.userId)
+         userId: user.data.userId
       }).go();
 
-      // should not have a valid user id without authenticator creds
+      // a user id without authenticator creds was never verified, so reject
       console.log("auths ", auths);
       if (!auths || auths.data.length == 0) {
-         throw new ParamError('auth not found');
+         throw new ParamError('authenticator not found');
       }
 
       allowedCreds = auths.data.map((cred: AuthItem) => ({
@@ -357,135 +300,46 @@ async function authenticationOptions(params: QParams, body: string): Promise<str
    }
 }
 
-async function authenticationOptionsOld(params: QParams, body: string): Promise<string> {
-
-   if (params.credid && (params.userid || params.username)) {
-      throw new ParamError('should not have credid and userid + username');
-   }
-   if (!params.credid && (!params.userid || !params.username)) {
-      throw new ParamError('missing credid or userid + username');
-   }
-
-   let user;
-   let auths;
-
-   if (params.credid) {
-      auths = await Authenticators.match({
-         credentialId: params.credid
-      }).go({ attributes: ['userId', 'credentialId', 'transports'] });
-
-      console.log("auths ", auths);
-      // This lets people guess, but no different then userid + username
-      // (credid seems to typically be 128bits... so a big number)
-      if (!auths || auths.data.length != 1) {
-         throw new ParamError('auth not found');
-      }
-
-      const users = await Users.query.byUserId({
-         userId: auths.data[0].userId
-      }).go();
-
-      console.log("users ", users);
-      if (!users || users.data.length != 1) {
-         throw new ParamError('user not found');
-      }
-      user = users;
-      user.data = user.data[0];
-
-   } else {
-      user = await Users.get({
-         userId: Number(params.userid),
-         userName: params.username
-      }).go();
-
-      console.log("user ", user);
-      if (!user || !user.data) {
-         // This lets people userid + username, but userid is 48bits
-         // along with minimum of 10 character username is 128bits
-         throw new ParamError('user not found')
-      }
-
-      auths = await Authenticators.query.byUserId({
-         userId: Number(user.data.userId)
-      }).go();
-
-      console.log("auths ", auths);
-      if (!auths || auths.data.length == 0) {
-         throw new ParamError('auth not found');
-      }
-   }
-
-   try {
-      const options = await generateAuthenticationOptions({
-         allowCredentials: auths.data.map((authenticator: AuthItem) => ({
-            id: base64UrlDecode(authenticator.credentialId),
-            type: 'public-key',
-            transports: authenticator.transports,
-         })),
-         rpID: RPID,
-         userVerification: 'preferred',
-      });
-
-      console.log(JSON.stringify(options));
-
-      Users.patch({
-         userId: user.data.userId,
-         userName: user.data.userName
-      }).set({
-         lastChallenge: options.challenge
-      }).go();
-
-      const expanded = {
-         ...options,
-         userId: user.data.userId,
-         userName: user.data.userName
-      };
-
-      console.log(JSON.stringify(expanded));
-      return JSON.stringify(expanded);
-
-   } catch (err) {
-      console.error(err);
-      throw new Error('unable to generate authentication options');
-   }
-}
-
-
 async function registrationOptions(params: QParams, body: string): Promise<string> {
 
-   let result: any;
+   // TODO: Improve use of ElectoDB types
+   let user: any;
 
    if (params.userid) {
-      // means this is an known user who is creating a new credential
-      if (!params.username) {
-         throw new ParamError('username must be provided with userid');
+      // means this is an known user who is creating a new credential cannot
+      // specify a new username
+      if (params.username) {
+         throw new ParamError('cannot specify username with existing userid');
       }
 
-      result = await Users.get({
-         userId: Number(params.userid),
-         userName: params.username
+      user = await Users.get({
+         userId: params.userid
       }).go();
 
-      if (!result || !result.data) {
-         throw new ParamError('user not found')
-      }
    } else {
       // Toally new users, must provide a username
       if (!params.username) {
          throw new ParamError('missing username');
       }
-      if (params.username.length < 10) {
-         throw new ParamError('username must be at least 10 character long');
+      if (params.username.length < 6 || params.username.length > 31) {
+         throw new ParamError('username must great than 5 and less than 32 character');
       }
 
-      let uId: number = 0;
+      let uId: string | undefined;
 
-      // Loop in the very unlikley even that we randomly pick
-      // a duplicate (out of 281 trillion)
-      for (let i = 0; i < 3; ++i) {
+      // Reduce round-trips by getting enough data for 3 x 16 bytes ID tries
+      // and 1 x 32 bytes siteKey
+      const rand80 = crypto.getRandomValues(new Uint8Array(80));
+
+      const RETRIES = 3;
+      const ID_BYTES = 16;
+      const SITEKEY_BYTES = 32;
+
+      // Loop in the very unlikley event that we randomly pick
+      // a duplicate (out of 3.4e38 possible)
+      for (let i = 0; i < RETRIES; ++i) {
          // 6 bytes to always be < Number.MAX_SAFE_INTEGER
-         const uIdB = new Uint8Array(6);
-         uId = bytesToNum(crypto.getRandomValues(uIdB));
+         uId = base64UrlEncode(rand80.slice(i * ID_BYTES, (i + 1) * ID_BYTES))!;
 
          const users = await Users.query.byUserId({
             userId: uId
@@ -494,33 +348,35 @@ async function registrationOptions(params: QParams, body: string): Promise<strin
          if (!users || users.data.length == 0) {
             break;
          } else {
-            uId = 0;
+            uId = undefined;
          }
       }
 
-      if (uId == 0) {
-         throw new Error('could not create userId');
+      if (!uId) {
+         throw new Error('could not allocate userId');
       }
 
-      result = await Users.create({
+      const siteKey = rand80.slice(RETRIES * ID_BYTES, RETRIES * ID_BYTES + SITEKEY_BYTES);
+      const b64Key = base64UrlEncode(siteKey);
+
+      user = await Users.create({
          userId: uId,
-         userName: params.username
+         userName: params.username,
+         siteKey: b64Key
       }).go();
    }
 
-   if (!result || !result.data) {
-      throw new ParamError('user not created')
+   console.log("user ", user);
+   if (!user || !user.data) {
+      throw new ParamError('user not created or found')
    }
-
-   console.log(result);
-   result = result.data;
 
    try {
       const options = await generateRegistrationOptions({
          rpName: RPNAME,
          rpID: RPID,
-         userID: result.userId,
-         userName: result.userName,
+         userID: user.data.userId,
+         userName: user.data.userName,
          attestationType: 'none',
          userVerification: 'preferred',
          authenticatorSelection: {
@@ -543,15 +399,146 @@ async function registrationOptions(params: QParams, body: string): Promise<strin
    }
 };
 
+async function putDescription(params: QParams, body: string): Promise<string> {
+
+   if (!body) {
+      throw new ParamError('missing description');
+   }
+   if (!params.credid) {
+      throw new ParamError('missing credid');
+   }
+   if (!params.userid) {
+      throw new ParamError('missing userid');
+   }
+
+
+   const patched = await Authenticators.patch({
+      userId: params.userid,
+      credentialId: params.credid
+   }).set({
+      description: body
+   }).go();
+
+   console.log('patched ', patched);
+   // figure out how to tell if it worked
+   return JSON.stringify({ succeeded: true });
+}
+
+async function putUserName(params: QParams, body: string): Promise<string> {
+
+   if (!body) {
+      throw new ParamError('missing username');
+   }
+   if (!params.userid) {
+      throw new ParamError('missing userid');
+   }
+   if (body.length < 6 || body.length > 31) {
+      throw new ParamError('username must great than 5 and less than 32 character');
+   }
+
+   const patched = await Users.patch({
+      userId: params.userid
+   }).set({
+      userName: body
+   }).go();
+
+   console.log('patched ', patched);
+   // figure out how to tell if it worked
+   return JSON.stringify({ succeeded: true });
+}
+
+async function recover(params: QParams, body: string): Promise<string> {
+   if (!params.userid) {
+      throw new ParamError('missing userid');
+   }
+   if (!params.sitekey) {
+      throw new ParamError('missing sitekey');
+   }
+
+   const user = await Users.get({
+      userId: params.userid
+   }).go();
+
+   console.log("user ", user);
+   if (!user || !user.data) {
+      // vague error to make guessing harder
+      throw new ParamError('user or sitekey not found')
+   }
+
+   if (user.data.siteKey != params.sitekey) {
+      // vague error to make guessing harder
+      throw new ParamError('user or sitekey not found')
+   }
+
+   const auths = await Authenticators.query.byUserId({
+      userId: user.data.userId
+   }).go({attributes:['userId', 'credentialId']});
+
+   console.log("auths ", auths);
+   if (auths && auths.data.length != 0) {
+      const deleted = await Authenticators.delete( auths.data ).go();
+      console.log('deleted ', deleted);
+   }
+
+   return registrationOptions({userid: user.data.userId}, '');
+}
+
+
+async function loadAAGUIDs(params: QParams, body: string): Promise<string> {
+
+   try {
+      const filePath = resolve('./combined_aaguid.json');
+      const contents = await readFile(filePath, { encoding: 'utf8' });
+
+      const aaguids = JSON.parse(contents);
+      const keys = Object.keys(aaguids);
+
+      const lightIconDefault = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgLTk2MCA5NjAgOTYwIiB3aWR0aD0iMjQiPjxwYXRoIGQ9Ik0yODAtNDAwcS0zMyAwLTU2LjUtMjMuNVQyMDAtNDgwcTAtMzMgMjMuNS01Ni41VDI4MC01NjBxMzMgMCA1Ni41IDIzLjVUMzYwLTQ4MHEwIDMzLTIzLjUgNTYuNVQyODAtNDAwWm0wIDE2MHEtMTAwIDAtMTcwLTcwVDQwLTQ4MHEwLTEwMCA3MC0xNzB0MTcwLTcwcTY3IDAgMTIxLjUgMzN0ODYuNSA4N2gzNTJsMTIwIDEyMC0xODAgMTgwLTgwLTYwLTgwIDYwLTg1LTYwaC00N3EtMzIgNTQtODYuNSA4N1QyODAtMjQwWm0wLTgwcTU2IDAgOTguNS0zNHQ1Ni41LTg2aDEyNWw1OCA0MSA4Mi02MSA3MSA1NSA3NS03NS00MC00MEg0MzVxLTE0LTUyLTU2LjUtODZUMjgwLTY0MHEtNjYgMC0xMTMgNDd0LTQ3IDExM3EwIDY2IDQ3IDExM3QxMTMgNDdaIi8+PC9zdmc+'
+
+      let count = 0;
+      let batch = [];
+      for (let key of keys) {
+         const details = aaguids[key];
+
+         batch.push({
+            aaguid: key,
+            name: details['name'],
+            lightIcon: details['icon_light'] ?? lightIconDefault
+         });
+
+         if (++count % 10 == 0) {
+            const results = await AAGUIDs.put(batch).go();
+            console.log(JSON.stringify(results));
+            batch = [];
+            await setTimeout(1000);
+         }
+      }
+
+      //      console.log('batch ', JSON.stringify(batch));
+      const results = await AAGUIDs.put(batch).go();
+      console.log(JSON.stringify(results));
+      return 'success';
+   } catch (err) {
+      console.error(err);
+      return 'failed';
+   }
+}
+
 
 const FUNCTIONS: { [key: string]: { [key: string]: (p: QParams, b: string) => Promise<string> } } = {
    GET: {
       regoptions: registrationOptions,
-      authoptions: authenticationOptions
+      authoptions: authenticationOptions,
+   },
+   PUT: {
+      description: putDescription,
+      username: putUserName,
    },
    POST: {
       verifyreg: verifyRegistration,
-      verifyauth: verifyAuthentication
+      verifyauth: verifyAuthentication,
+      recover: recover,
+      loadaaguids: loadAAGUIDs, // for internal use, don't add to cloudfront
    }
 }
 
