@@ -447,6 +447,9 @@ async function putUserName(params: QParams, body: string): Promise<string> {
    return JSON.stringify({ succeeded: true });
 }
 
+// recover removes all existing passkeys, then initiates the
+// process or creating a new passkey. Caller is expected to followup
+// with a call to verifyRegistration
 async function recover(params: QParams, body: string): Promise<string> {
    if (!params.userid) {
       throw new ParamError('missing userid');
@@ -472,15 +475,16 @@ async function recover(params: QParams, body: string): Promise<string> {
 
    const auths = await Authenticators.query.byUserId({
       userId: user.data.userId
-   }).go({attributes:['userId', 'credentialId']});
+   }).go({ attributes: ['userId', 'credentialId'] });
 
    console.log("auths ", auths);
    if (auths && auths.data.length != 0) {
-      const deleted = await Authenticators.delete( auths.data ).go();
+      const deleted = await Authenticators.delete(auths.data).go();
       console.log('deleted ', deleted);
    }
 
-   return registrationOptions({userid: user.data.userId}, '');
+   // caller should followup with call to verifyRegistration
+   return registrationOptions({ userid: user.data.userId }, '');
 }
 
 
