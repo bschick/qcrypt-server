@@ -114,6 +114,10 @@ const Authenticators = new Entity(
             default: () => Date.now(),
             // cannot be modified after created
             readOnly: true
+         },
+         lastLogin: {
+            type: "number",
+            required: false
          }
       },
       indexes: {
