@@ -449,7 +449,7 @@ async function registrationOptions(params: QParams, body: string): Promise<strin
 
 async function putDescription(params: QParams, body: string): Promise<string> {
 
-   const user = await getVerifiedUser(params.userid, params.userCred);
+   const user = await getVerifiedUser(params.userid, params.usercred);
 
    if (!body) {
       throw new ParamError('missing description');
@@ -481,7 +481,7 @@ async function putDescription(params: QParams, body: string): Promise<string> {
 
 async function putUserName(params: QParams, body: string): Promise<string> {
 
-   const user = await getVerifiedUser(params.userid, params.userCred);
+   const user = await getVerifiedUser(params.userid, params.usercred);
 
    if (!body) {
       throw new ParamError('missing username');
@@ -509,7 +509,7 @@ async function putUserName(params: QParams, body: string): Promise<string> {
 
 async function getAuthenticators(params: QParams, body: string): Promise<string> {
 
-   const user = await getVerifiedUser(params.userid, params.userCred);
+   const user = await getVerifiedUser(params.userid, params.usercred);
 
    const auths = await Authenticators.query.byUserId({
       userId: user.data.userId
@@ -560,7 +560,7 @@ async function getAuthenticators(params: QParams, body: string): Promise<string>
 
 async function deleteAuthenticator(params: QParams, body: string): Promise<string> {
 
-   const user = await getVerifiedUser(params.userid, params.userCred);
+   const user = await getVerifiedUser(params.userid, params.usercred);
    if (!params.credid) {
       throw new ParamError('missing credid');
    }
@@ -607,7 +607,7 @@ async function deleteAuthenticator(params: QParams, body: string): Promise<strin
 // with a call to verifyRegistration
 async function recover(params: QParams, body: string): Promise<string> {
 
-   const user = await getVerifiedUser(params.userid, params.userCred);
+   const user = await getVerifiedUser(params.userid, params.usercred);
 
    const auths = await Authenticators.query.byUserId({
       userId: user.data.userId
