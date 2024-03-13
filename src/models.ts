@@ -23,7 +23,7 @@ const Users = new Entity(
             type: "string",
             required: true
          },
-         siteKey: {
+         userCred: {
             type: "string",
             required: true
          },

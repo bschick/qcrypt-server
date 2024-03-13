@@ -22,7 +22,7 @@ type QParams = {
 
 type RegistrationInfo = {
    verified: boolean;
-   siteKey?: string;
+   userCred?: string;
    userId?: string;
    userName?: string;
    lightIcon?: string;
@@ -38,7 +38,7 @@ type AuthenticatorInfo = {
 
 type AuthenticationInfo = {
    verified: boolean;
-   siteKey?: string;
+   userCred?: string;
    userId?: string;
    userName?: string;
 };
@@ -156,7 +156,7 @@ async function verifyAuthentication(params: QParams, bodyStr: string): Promise<s
    };
 
    if (verification.verified) {
-      response.siteKey = user.data.siteKey;
+      response.userCred = user.data.userCred;
       response.userId = user.data.userId;
       response.userName = user.data.userName;
 
@@ -281,7 +281,7 @@ async function verifyRegistration(params: QParams, bodyStr: string): Promise<str
          verified: true
       }).go();
 
-      response.siteKey = user.data.siteKey;
+      response.userCred = user.data.userCred;
       response.description = description;
       response.lightIcon = lightIcon;
       response.userId = user.data.userId;
@@ -305,7 +305,7 @@ async function authenticationOptions(params: QParams, body: string): Promise<str
 
       console.log("user ", user);
       if (!user || !user.data) {
-         // Callers could use this to guess userid, but userid is 128bits psuedo-random, 
+         // Callers could use this to guess userids, but userid is 128bits psuedo-random,
          // so it would take an eternity (and size-large aws bills for me)
          throw new ParamError('user not found')
       }
@@ -378,11 +378,11 @@ async function registrationOptions(params: QParams, body: string): Promise<strin
 
       const RETRIES = 3;
       const ID_BYTES = 16;
-      const SITEKEY_BYTES = 32;
+      const USERCRED_BYTES = 32;
 
       // Reduce round-trips by getting enough data for 3 x 16 bytes ID tries
-      // and 1 x 32 bytes siteKey
-      const randData = crypto.getRandomValues(new Uint8Array(RETRIES * ID_BYTES + SITEKEY_BYTES));
+      // and 1 x 32 bytes userCred
+      const randData = crypto.getRandomValues(new Uint8Array(RETRIES * ID_BYTES + USERCRED_BYTES));
 
       // Loop in the very unlikley event that we randomly pick
       // a duplicate (out of 3.4e38 possible)
@@ -404,13 +404,13 @@ async function registrationOptions(params: QParams, body: string): Promise<strin
          throw new Error('could not allocate userId');
       }
 
-      const siteKey = randData.slice(RETRIES * ID_BYTES, RETRIES * ID_BYTES + SITEKEY_BYTES);
-      const b64Key = base64UrlEncode(siteKey);
+      const userCred = randData.slice(RETRIES * ID_BYTES, RETRIES * ID_BYTES + USERCRED_BYTES);
+      const b64Key = base64UrlEncode(userCred);
 
       user = await Users.create({
          userId: uId,
          userName: params.username,
-         siteKey: b64Key
+         userCred: b64Key
       }).go();
    }
 
@@ -449,7 +449,7 @@ async function registrationOptions(params: QParams, body: string): Promise<strin
 
 async function putDescription(params: QParams, body: string): Promise<string> {
 
-   const user = await getVerifiedUser(params.userid, params.sitekey);
+   const user = await getVerifiedUser(params.userid, params.userCred);
 
    if (!body) {
       throw new ParamError('missing description');
@@ -481,7 +481,7 @@ async function putDescription(params: QParams, body: string): Promise<string> {
 
 async function putUserName(params: QParams, body: string): Promise<string> {
 
-   const user = await getVerifiedUser(params.userid, params.sitekey);
+   const user = await getVerifiedUser(params.userid, params.userCred);
 
    if (!body) {
       throw new ParamError('missing username');
@@ -509,7 +509,7 @@ async function putUserName(params: QParams, body: string): Promise<string> {
 
 async function getAuthenticators(params: QParams, body: string): Promise<string> {
 
-   const user = await getVerifiedUser(params.userid, params.sitekey);
+   const user = await getVerifiedUser(params.userid, params.userCred);
 
    const auths = await Authenticators.query.byUserId({
       userId: user.data.userId
@@ -560,7 +560,7 @@ async function getAuthenticators(params: QParams, body: string): Promise<string>
 
 async function deleteAuthenticator(params: QParams, body: string): Promise<string> {
 
-   const user = await getVerifiedUser(params.userid, params.sitekey);
+   const user = await getVerifiedUser(params.userid, params.userCred);
    if (!params.credid) {
       throw new ParamError('missing credid');
    }
@@ -607,7 +607,7 @@ async function deleteAuthenticator(params: QParams, body: string): Promise<strin
 // with a call to verifyRegistration
 async function recover(params: QParams, body: string): Promise<string> {
 
-   const user = await getVerifiedUser(params.userid, params.sitekey);
+   const user = await getVerifiedUser(params.userid, params.userCred);
 
    const auths = await Authenticators.query.byUserId({
       userId: user.data.userId
@@ -624,13 +624,13 @@ async function recover(params: QParams, body: string): Promise<string> {
 }
 
 // TODO make better use of ElectodB types for return...
-async function getVerifiedUser(userId: string, siteKey: string): Promise<any> {
+async function getVerifiedUser(userId: string, userCred: string): Promise<any> {
 
    if (!userId) {
       throw new ParamError('missing userid');
    }
-   if (!siteKey) {
-      throw new ParamError('missing sitekey');
+   if (!userCred) {
+      throw new ParamError('missing userCred');
    }
 
    const user = await Users.get({
@@ -640,12 +640,12 @@ async function getVerifiedUser(userId: string, siteKey: string): Promise<any> {
    console.log("user ", user);
    if (!user || !user.data) {
       // vague error to make guessing harder
-      throw new ParamError('user or sitekey not found')
+      throw new ParamError('user or userCred not found')
    }
 
-   if (user.data.siteKey != siteKey) {
+   if (user.data.userCred != userCred) {
       // vague error to make guessing harder
-      throw new ParamError('user or sitekey not found')
+      throw new ParamError('user or userCred not found')
    }
 
    return user;
