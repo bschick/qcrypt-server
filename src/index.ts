@@ -51,8 +51,6 @@ type DeleteInfo = {
 const lightIconDefault = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgLTk2MCA5NjAgOTYwIiB3aWR0aD0iMjQiPjxwYXRoIGQ9Ik0yODAtNDAwcS0zMyAwLTU2LjUtMjMuNVQyMDAtNDgwcTAtMzMgMjMuNS01Ni41VDI4MC01NjBxMzMgMCA1Ni41IDIzLjVUMzYwLTQ4MHEwIDMzLTIzLjUgNTYuNVQyODAtNDAwWm0wIDE2MHEtMTAwIDAtMTcwLTcwVDQwLTQ4MHEwLTEwMCA3MC0xNzB0MTcwLTcwcTY3IDAgMTIxLjUgMzN0ODYuNSA4N2gzNTJsMTIwIDEyMC0xODAgMTgwLTgwLTYwLTgwIDYwLTg1LTYwaC00N3EtMzIgNTQtODYuNSA4N1QyODAtMjQwWm0wLTgwcTU2IDAgOTguNS0zNHQ1Ni41LTg2aDEyNWw1OCA0MSA4Mi02MSA3MSA1NSA3NS03NS00MC00MEg0MzVxLTE0LTUyLTU2LjUtODZUMjgwLTY0MHEtNjYgMC0xMTMgNDd0LTQ3IDExM3EwIDY2IDQ3IDExM3QxMTMgNDdaIi8+PC9zdmc+'
 
 const RPNAME = 'Quick Crypt';
-const RPID = 't1.schicks.net';
-const ORIGIN = `https://${RPID}:4200`;
 const ALGIDS = [24, 7, 3, 1, -7, -257];
 
 class ParamError extends Error {
@@ -71,7 +69,7 @@ function base64Decode(base64: string | undefined): Buffer | undefined {
 }
 
 
-async function verifyAuthentication(params: QParams, bodyStr: string): Promise<string> {
+async function verifyAuthentication(rpID: string, rpOrigin: string, params: QParams, bodyStr: string): Promise<string> {
    const body = JSON.parse(bodyStr);
 
    if (!body.response || !body.response.userHandle) {
@@ -140,8 +138,8 @@ async function verifyAuthentication(params: QParams, bodyStr: string): Promise<s
       verification = await verifyAuthenticationResponse({
          response: body,
          expectedChallenge: challenge.data.challenge,
-         expectedOrigin: ORIGIN,
-         expectedRPID: RPID,
+         expectedOrigin: rpOrigin,
+         expectedRPID: rpID,
          authenticator: authenticatorDevice
       });
    } catch (error) {
@@ -172,7 +170,7 @@ async function verifyAuthentication(params: QParams, bodyStr: string): Promise<s
    return JSON.stringify(response);
 }
 
-async function verifyRegistration(params: QParams, bodyStr: string): Promise<string> {
+async function verifyRegistration(rpID: string, rpOrigin: string, params: QParams, bodyStr: string): Promise<string> {
    const body = JSON.parse(bodyStr);
 
    if (!body.userId) {
@@ -217,8 +215,8 @@ async function verifyRegistration(params: QParams, bodyStr: string): Promise<str
       verification = await verifyRegistrationResponse({
          response: body,
          expectedChallenge: challenge.data.challenge,
-         expectedOrigin: ORIGIN,
-         expectedRPID: RPID,
+         expectedOrigin: rpOrigin,
+         expectedRPID: rpID,
          supportedAlgorithmIDs: ALGIDS
       });
    } catch (err) {
@@ -291,7 +289,7 @@ async function verifyRegistration(params: QParams, bodyStr: string): Promise<str
    return JSON.stringify(response);
 }
 
-async function authenticationOptions(params: QParams, body: string): Promise<string> {
+async function authenticationOptions(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    // If no userid is provided, then we don't return allowed creds and
    // the user if forced to pick one on their own. That happens when the user is
@@ -330,7 +328,7 @@ async function authenticationOptions(params: QParams, body: string): Promise<str
    try {
       const options = await generateAuthenticationOptions({
          allowCredentials: allowedCreds,
-         rpID: RPID,
+         rpID: rpID,
          userVerification: 'preferred',
       });
 
@@ -349,7 +347,7 @@ async function authenticationOptions(params: QParams, body: string): Promise<str
    }
 }
 
-async function registrationOptions(params: QParams, body: string): Promise<string> {
+async function registrationOptions(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    // TODO: Improve use of ElectoDB types
    let user: any;
@@ -422,7 +420,7 @@ async function registrationOptions(params: QParams, body: string): Promise<strin
    try {
       const options = await generateRegistrationOptions({
          rpName: RPNAME,
-         rpID: RPID,
+         rpID: rpID,
          userID: user.data.userId,
          userName: user.data.userName,
          attestationType: 'none',
@@ -447,7 +445,7 @@ async function registrationOptions(params: QParams, body: string): Promise<strin
    }
 };
 
-async function putDescription(params: QParams, body: string): Promise<string> {
+async function putDescription(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    const user = await getVerifiedUser(params.userid, params.usercred);
 
@@ -479,7 +477,7 @@ async function putDescription(params: QParams, body: string): Promise<string> {
    });
 }
 
-async function putUserName(params: QParams, body: string): Promise<string> {
+async function putUserName(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    const user = await getVerifiedUser(params.userid, params.usercred);
 
@@ -507,7 +505,7 @@ async function putUserName(params: QParams, body: string): Promise<string> {
    });
 }
 
-async function getAuthenticators(params: QParams, body: string): Promise<string> {
+async function getAuthenticators(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    const user = await getVerifiedUser(params.userid, params.usercred);
 
@@ -558,7 +556,7 @@ async function getAuthenticators(params: QParams, body: string): Promise<string>
    return JSON.stringify(response);
 }
 
-async function deleteAuthenticator(params: QParams, body: string): Promise<string> {
+async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    const user = await getVerifiedUser(params.userid, params.usercred);
    if (!params.credid) {
@@ -596,7 +594,7 @@ async function deleteAuthenticator(params: QParams, body: string): Promise<strin
       delUserId = user.data.userId;
    }
 
-   return JSON.stringify({ 
+   return JSON.stringify({
       credentialId: params.credid,
       userId: delUserId,
    });
@@ -605,7 +603,7 @@ async function deleteAuthenticator(params: QParams, body: string): Promise<strin
 // recover removes all existing passkeys, then initiates the
 // process or creating a new passkey. Caller is expected to followup
 // with a call to verifyRegistration
-async function recover(params: QParams, body: string): Promise<string> {
+async function recover(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    const user = await getVerifiedUser(params.userid, params.usercred);
 
@@ -613,6 +611,10 @@ async function recover(params: QParams, body: string): Promise<string> {
       userId: user.data.userId
    }).go({ attributes: ['userId', 'credentialId'] });
 
+   // Note that if the creation of a new passkey is aborted or cancels, the account
+   // will be left with no passkeys. Could address this by marking passkey for
+   // deletion and cleaning up after, but then recovery may be less certain in
+   // a security incident.
    console.log("auths ", auths);
    if (auths && auths.data.length != 0) {
       const deleted = await Authenticators.delete(auths.data).go();
@@ -620,7 +622,7 @@ async function recover(params: QParams, body: string): Promise<string> {
    }
 
    // caller should followup with call to verifyRegistration
-   return registrationOptions({ userid: user.data.userId }, '');
+   return registrationOptions(rpID, rpOrigin, { userid: user.data.userId }, '');
 }
 
 // TODO make better use of ElectodB types for return...
@@ -652,7 +654,7 @@ async function getVerifiedUser(userId: string, userCred: string): Promise<any> {
 }
 
 
-async function loadAAGUIDs(params: QParams, body: string): Promise<string> {
+async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    try {
       const filePath = resolve('./combined_aaguid.json');
@@ -691,7 +693,7 @@ async function loadAAGUIDs(params: QParams, body: string): Promise<string> {
 }
 
 
-const FUNCTIONS: { [key: string]: { [key: string]: (p: QParams, b: string) => Promise<string> } } = {
+const FUNCTIONS: { [key: string]: { [key: string]: (r:string, o:string, p:QParams, b:string) => Promise<string> } } = {
    GET: {
       regoptions: registrationOptions,
       authoptions: authenticationOptions,
@@ -722,13 +724,20 @@ function response(body: string, status: number): { [key: string]: string | numbe
    return resp;
 }
 
-
 async function handler(event: any, context: any) {
 
    console.log(event);
 
-   if (!event || !event['requestContext' || !event['requestContext']['http']]) {
+   if (!event || !event['requestContext' ||
+         !event['requestContext']['http']] || !event['headers'] ||
+         !event['headers']['x-passkey-rpid']) {
       return response("invalid request, missing context", 400);
+   }
+
+   const rpID = event['headers']['x-passkey-rpid'];
+   let rpOrigin = `https://${rpID}`;
+   if(event['headers']['x-passkey-port']) {
+      rpOrigin += `:${event['headers']['x-passkey-port']}`;
    }
 
    const method: string = event['requestContext']['http']['method'].toUpperCase();
@@ -751,9 +760,10 @@ async function handler(event: any, context: any) {
 
    try {
       console.log('calling: ' + func.name);
+      console.log('rpID: ' + rpID + ' rpOrigin: ' + rpOrigin);
       console.log('params: ' + JSON.stringify(params));
       console.log('body: ' + body);
-      const result = await func(params, body);
+      const result = await func(rpID, rpOrigin, params, body);
       return response(result, 200);
    } catch (err) {
       console.error(err);
