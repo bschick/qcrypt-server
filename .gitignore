@@ -1,5 +1,6 @@
 #MacOS cruft
 .DS_Store
+assets/aaguid/
 
 # Logs
 logs

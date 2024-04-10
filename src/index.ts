@@ -26,6 +26,7 @@ type RegistrationInfo = {
    userId?: string;
    userName?: string;
    lightIcon?: string;
+   darkIcon?: string;
    description?: string;
 };
 
@@ -33,6 +34,7 @@ type AuthenticatorInfo = {
    credentialId: string;
    description: string;
    lightIcon: string;
+   darkIcon: string;
    name: string;
 };
 
@@ -48,7 +50,8 @@ type DeleteInfo = {
    userId?: string;
 };
 
-const lightIconDefault = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgLTk2MCA5NjAgOTYwIiB3aWR0aD0iMjQiPjxwYXRoIGQ9Ik0yODAtNDAwcS0zMyAwLTU2LjUtMjMuNVQyMDAtNDgwcTAtMzMgMjMuNS01Ni41VDI4MC01NjBxMzMgMCA1Ni41IDIzLjVUMzYwLTQ4MHEwIDMzLTIzLjUgNTYuNVQyODAtNDAwWm0wIDE2MHEtMTAwIDAtMTcwLTcwVDQwLTQ4MHEwLTEwMCA3MC0xNzB0MTcwLTcwcTY3IDAgMTIxLjUgMzN0ODYuNSA4N2gzNTJsMTIwIDEyMC0xODAgMTgwLTgwLTYwLTgwIDYwLTg1LTYwaC00N3EtMzIgNTQtODYuNSA4N1QyODAtMjQwWm0wLTgwcTU2IDAgOTguNS0zNHQ1Ni41LTg2aDEyNWw1OCA0MSA4Mi02MSA3MSA1NSA3NS03NS00MC00MEg0MzVxLTE0LTUyLTU2LjUtODZUMjgwLTY0MHEtNjYgMC0xMTMgNDd0LTQ3IDExM3EwIDY2IDQ3IDExM3QxMTMgNDdaIi8+PC9zdmc+'
+const lightFileDefault = 'assets/aaguid/img/default_light.svg'
+const darkFileDefault = 'assets/aaguid/img/default_dark.svg'
 
 const RPNAME = 'Quick Crypt';
 const ALGIDS = [24, 7, 3, 1, -7, -257];
@@ -247,13 +250,15 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       }).go();
 
       let description = 'Passkey';
-      let lightIcon = lightIconDefault;
+      let lightIcon = lightFileDefault;
+      let darkIcon = darkFileDefault;
 
       console.log("aaguidDetails ", aaguidDetails);
       if (aaguidDetails && aaguidDetails.data) {
          description = aaguidDetails.data.name ?? 'Passkey';
          description.slice(0, 42);
-         lightIcon = aaguidDetails.data.lightIcon ?? lightIconDefault;
+         lightIcon = aaguidDetails.data.lightIcon ?? lightFileDefault;
+         darkIcon = aaguidDetails.data.darkIcon ?? darkFileDefault;
       } else {
          console.error('aaguid ' + aaguid + ' not found');
       }
@@ -282,6 +287,7 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       response.userCred = user.data.userCred;
       response.description = description;
       response.lightIcon = lightIcon;
+      response.darkIcon = darkIcon;
       response.userId = user.data.userId;
       response.userName = user.data.userName;
    }
@@ -541,7 +547,8 @@ async function getAuthenticators(rpID: string, rpOrigin: string, params: QParams
 
    for (let aaguidDetail of aaguidsDetail.data) {
       aaguidsMap.set(aaguidDetail.aaguid, {
-         aaguid: aaguidDetail.lightIcon,
+         lightIcon: aaguidDetail.lightIcon,
+         darkIcon: aaguidDetail.darkIcon,
          name: aaguidDetail.name
       });
    }
@@ -549,7 +556,8 @@ async function getAuthenticators(rpID: string, rpOrigin: string, params: QParams
    const response: AuthenticatorInfo[] = auths.data.map((cred: AuthItem) => ({
       credentialId: cred.credentialId,
       description: cred.description,
-      lightIcon: aaguidsMap.get(cred.aaguid).aaguid ?? lightIconDefault,
+      lightIcon: aaguidsMap.get(cred.aaguid).lightIcon ?? lightFileDefault,
+      darkIcon: aaguidsMap.get(cred.aaguid).darkIcon ?? darkFileDefault,
       name: aaguidsMap.get(cred.aaguid).name ?? 'Passkey',
    }));
 
@@ -657,7 +665,7 @@ async function getVerifiedUser(userId: string, userCred: string): Promise<any> {
 async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    try {
-      const filePath = resolve('./combined_aaguid.json');
+      const filePath = resolve('./combined.json');
       const contents = await readFile(filePath, { encoding: 'utf8' });
 
       const aaguids = JSON.parse(contents);
@@ -671,7 +679,8 @@ async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body
          batch.push({
             aaguid: key,
             name: details['name'],
-            lightIcon: details['icon_light'] ?? lightIconDefault
+            lightIcon: details['light_file'] ?? lightFileDefault,
+            darkIcon: details['dark_file'] ?? darkFileDefault
          });
 
          if (++count % 10 == 0) {

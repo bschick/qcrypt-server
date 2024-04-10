@@ -203,6 +203,10 @@ const AAGUIDs = new Entity(
          lightIcon: {
             type: "string",
             required: true
+         },
+         darkIcon: {
+            type: "string",
+            required: true
          }
       },
       indexes: {
