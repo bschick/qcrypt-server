@@ -89,7 +89,6 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       userId: body.response.userHandle
    }).go();
 
-   console.log("user ", user);
    if (!user || !user.data) {
       throw new ParamError('user not found')
    }
@@ -102,7 +101,6 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       challenge: body.challenge
    }).go();
 
-   console.log("challenge ", challenge);
    if (!challenge || !challenge.data) {
       throw new ParamError('challenge not valid');
    }
@@ -122,7 +120,6 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       credentialId: body.id
    }).go();
 
-   console.log("authenticator ", authenticator);
    if (!authenticator || !authenticator.data) {
       throw new ParamError('authenticator not found');
    }
@@ -133,8 +130,6 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       count: 0, // not using counters
       transports: authenticator.data.transports
    }
-
-   console.log("authenticatorDevice, ", authenticatorDevice);
 
    let verification;
    try {
@@ -149,8 +144,6 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       console.error(error);
       throw new ParamError('invalid authorizatoin');
    }
-
-   console.log("verification ", verification);
 
    let response: AuthenticationInfo = {
       verified: verification.verified
@@ -167,7 +160,6 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       }).set({
          lastLogin: Date.now()
       }).go();
-      console.log('patched ', patched);
    }
 
    return JSON.stringify(response);
@@ -187,7 +179,6 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       userId: body.userId,
    }).go();
 
-   console.log("user ", user);
    if (!user || !user.data) {
       throw new ParamError('user not found')
    }
@@ -198,7 +189,6 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       challenge: body.challenge
    }).go();
 
-   console.log("challenge ", challenge);
    if (!challenge || !challenge.data) {
       throw new ParamError('challenge not valid');
    }
@@ -227,8 +217,6 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       throw new ParamError('invalid registration');
    }
 
-   console.log("verification ", verification);
-
    let response: RegistrationInfo = {
       verified: verification.verified
    };
@@ -253,7 +241,6 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       let lightIcon = lightFileDefault;
       let darkIcon = darkFileDefault;
 
-      console.log("aaguidDetails ", aaguidDetails);
       if (aaguidDetails && aaguidDetails.data) {
          description = aaguidDetails.data.name ?? 'Passkey';
          description.slice(0, 42);
@@ -307,7 +294,6 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
          userId: params.userid,
       }).go();
 
-      console.log("user ", user);
       if (!user || !user.data) {
          // Callers could use this to guess userids, but userid is 128bits psuedo-random,
          // so it would take an eternity (and size-large aws bills for me)
@@ -319,7 +305,6 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
       }).go();
 
       // a user id without authenticator creds was never verified, so reject
-      console.log("auths ", auths);
       if (!auths || auths.data.length == 0) {
          throw new ParamError('authenticator not found');
       }
@@ -338,13 +323,10 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
          userVerification: 'preferred',
       });
 
-      console.log(JSON.stringify(options));
-
       await Challenges.create({
          challenge: options.challenge
       }).go();
 
-      console.log("options ", JSON.stringify(options));
       return JSON.stringify(options);
 
    } catch (err) {
@@ -418,7 +400,6 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
       }).go();
    }
 
-   console.log("user ", user);
    if (!user || !user.data) {
       throw new ParamError('user not created or found')
    }
@@ -437,8 +418,6 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
          },
          supportedAlgorithmIDs: ALGIDS,
       });
-
-      console.log(JSON.stringify(options));
 
       await Challenges.create({
          challenge: options.challenge
@@ -472,7 +451,6 @@ async function putDescription(rpID: string, rpOrigin: string, params: QParams, b
       description: body
    }).go();
 
-   console.log('patched ', patched);
    if (!patched || !patched.data) {
       throw new ParamError('description update failed');
    }
@@ -500,7 +478,6 @@ async function putUserName(rpID: string, rpOrigin: string, params: QParams, body
       userName: body
    }).go();
 
-   console.log('patched ', patched);
    if (!patched || !patched.data) {
       throw new ParamError('description update failed');
    }
@@ -519,7 +496,6 @@ async function getAuthenticators(rpID: string, rpOrigin: string, params: QParams
       userId: user.data.userId
    }).go({ attributes: ['description', 'credentialId', 'aaguid', 'createdAt'] });
 
-   console.log("auths ", auths);
    if (!auths || auths.data.length == 0) {
       return '[]';
    }
@@ -541,9 +517,7 @@ async function getAuthenticators(rpID: string, rpOrigin: string, params: QParams
       });
    }
 
-   console.log("aaguidsGet ", aaguidsGet);
    const aaguidsDetail = await AAGUIDs.get(aaguidsGet).go();
-   console.log("aaguidsDetail ", aaguidsDetail);
 
    for (let aaguidDetail of aaguidsDetail.data) {
       aaguidsMap.set(aaguidDetail.aaguid, {
@@ -576,7 +550,6 @@ async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QPara
       credentialId: params.credid
    }).go();
 
-   console.log("deleted auth ", deleted);
    if (!deleted || !deleted.data) {
       throw new ParamError('authenticator not found');
    }
@@ -587,7 +560,6 @@ async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QPara
       userId: user.data.userId
    }).go({ attributes: ['credentialId'] });
 
-   console.log("auths ", auths);
    let delUserId: string | undefined;
 
    if (auths && auths.data.length == 0) {
@@ -595,7 +567,6 @@ async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QPara
          userId: user.data.userId
       }).go();
 
-      console.log("deleted user ", deleted);
       if (!deleted || !deleted.data) {
          throw new ParamError('user not found');
       }
@@ -623,10 +594,8 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
    // will be left with no passkeys. Could address this by marking passkey for
    // deletion and cleaning up after, but then recovery may be less certain in
    // a security incident.
-   console.log("auths ", auths);
    if (auths && auths.data.length != 0) {
       const deleted = await Authenticators.delete(auths.data).go();
-      console.log('deleted ', deleted);
    }
 
    // caller should followup with call to verifyRegistration
@@ -647,7 +616,6 @@ async function getVerifiedUser(userId: string, userCred: string): Promise<any> {
       userId: userId
    }).go();
 
-   console.log("user ", user);
    if (!user || !user.data) {
       // vague error to make guessing harder
       throw new ParamError('user or userCred not found')
@@ -684,16 +652,13 @@ async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body
          });
 
          if (++count % 10 == 0) {
-            const results = await AAGUIDs.put(batch).go();
-            console.log(JSON.stringify(results));
+            await AAGUIDs.put(batch).go();
             batch = [];
             await setTimeout(1000);
          }
       }
 
-      //      console.log('batch ', JSON.stringify(batch));
       const results = await AAGUIDs.put(batch).go();
-      console.log(JSON.stringify(results));
       return 'success';
    } catch (err) {
       console.error(err);
@@ -729,13 +694,13 @@ function response(body: string, status: number): { [key: string]: string | numbe
       statusCode: status,
       body: body
    };
-   console.log("response: " + JSON.stringify(resp));
    return resp;
 }
 
 async function handler(event: any, context: any) {
 
-   console.log(event);
+// Enable for temporary debuging only, since this logs user credentials
+//   console.log(event);
 
    if (!event || !event['requestContext' ||
          !event['requestContext']['http']] || !event['headers'] ||
@@ -770,8 +735,8 @@ async function handler(event: any, context: any) {
    try {
       console.log('calling: ' + func.name);
       console.log('rpID: ' + rpID + ' rpOrigin: ' + rpOrigin);
-      console.log('params: ' + JSON.stringify(params));
-      console.log('body: ' + body);
+//      console.log('params: ' + JSON.stringify(params));
+//      console.log('body: ' + body);
       const result = await func(rpID, rpOrigin, params, body);
       return response(result, 200);
    } catch (err) {
