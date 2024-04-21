@@ -32,6 +32,11 @@ const Users = new Entity(
             default: () => false,
             required: true
          },
+         recovered: {
+            type: "number",
+            default: () => 0,
+            required: true
+         },
          createdAt: {
             type: "number",
             default: () => Date.now(),

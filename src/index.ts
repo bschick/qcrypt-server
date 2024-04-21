@@ -479,7 +479,7 @@ async function putUserName(rpID: string, rpOrigin: string, params: QParams, body
    }).go();
 
    if (!patched || !patched.data) {
-      throw new ParamError('description update failed');
+      throw new ParamError('username update failed');
    }
 
    return JSON.stringify({
@@ -598,6 +598,18 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
       const deleted = await Authenticators.delete(auths.data).go();
    }
 
+   const rcount = user.data.recovered ? user.data.recovered + 1 : 1;
+
+   const patched = await Users.patch({
+      userId: user.data.userId
+   }).set({
+      recovered: rcount,
+   }).go();
+
+   if (!patched || !patched.data) {
+      console.error('recovered count update failed');
+   }
+
    // caller should followup with call to verifyRegistration
    return registrationOptions(rpID, rpOrigin, { userid: user.data.userId }, '');
 }
@@ -667,7 +679,7 @@ async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body
 }
 
 
-const FUNCTIONS: { [key: string]: { [key: string]: (r:string, o:string, p:QParams, b:string) => Promise<string> } } = {
+const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QParams, b: string) => Promise<string> } } = {
    GET: {
       regoptions: registrationOptions,
       authoptions: authenticationOptions,
@@ -699,18 +711,18 @@ function response(body: string, status: number): { [key: string]: string | numbe
 
 async function handler(event: any, context: any) {
 
-// Enable for temporary debuging only, since this logs user credentials
-//   console.log(event);
+   // Enable for temporary debuging only, since this logs user credentials
+   //   console.log(event);
 
    if (!event || !event['requestContext' ||
-         !event['requestContext']['http']] || !event['headers'] ||
-         !event['headers']['x-passkey-rpid']) {
+      !event['requestContext']['http']] || !event['headers'] ||
+      !event['headers']['x-passkey-rpid']) {
       return response("invalid request, missing context", 400);
    }
 
    const rpID = event['headers']['x-passkey-rpid'];
    let rpOrigin = `https://${rpID}`;
-   if(event['headers']['x-passkey-port']) {
+   if (event['headers']['x-passkey-port']) {
       rpOrigin += `:${event['headers']['x-passkey-port']}`;
    }
 
@@ -735,8 +747,8 @@ async function handler(event: any, context: any) {
    try {
       console.log('calling: ' + func.name);
       console.log('rpID: ' + rpID + ' rpOrigin: ' + rpOrigin);
-//      console.log('params: ' + JSON.stringify(params));
-//      console.log('body: ' + body);
+      //      console.log('params: ' + JSON.stringify(params));
+      //      console.log('body: ' + body);
       const result = await func(rpID, rpOrigin, params, body);
       return response(result, 200);
    } catch (err) {
