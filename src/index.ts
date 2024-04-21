@@ -711,7 +711,7 @@ function response(body: string, status: number): { [key: string]: string | numbe
 
 async function handler(event: any, context: any) {
 
-   // Enable for temporary debuging only, since this logs user credentials
+   // Uncomment for temporary debuging only, since this logs user credentials
    //   console.log(event);
 
    if (!event || !event['requestContext' ||
@@ -745,8 +745,9 @@ async function handler(event: any, context: any) {
    const params: QParams = event.queryStringParameters ?? {};
 
    try {
-      console.log('calling: ' + func.name);
+      console.log('calling function for: ' + method + ' ' + resource);
       console.log('rpID: ' + rpID + ' rpOrigin: ' + rpOrigin);
+      // Uncomment for debugging
       //      console.log('params: ' + JSON.stringify(params));
       //      console.log('body: ' + body);
       const result = await func(rpID, rpOrigin, params, body);
