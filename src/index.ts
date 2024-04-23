@@ -606,6 +606,7 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
       recovered: rcount,
    }).go();
 
+   // log but continue...
    if (!patched || !patched.data) {
       console.error('recovered count update failed');
    }
@@ -706,6 +707,7 @@ function response(body: string, status: number): { [key: string]: string | numbe
       statusCode: status,
       body: body
    };
+   console.log(`status: ${status} ${status != 200 ? body : ''}`);
    return resp;
 }
 
