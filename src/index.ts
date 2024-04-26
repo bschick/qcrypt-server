@@ -5,12 +5,13 @@ const {
    verifyRegistrationResponse,
 } = require('@simplewebauthn/server');
 const { Buffer } = require("node:buffer");
-const { Users, Authenticators, Challenges, AAGUIDs } = require("./models.ts");
+const { Users, Authenticators, Challenges, AuthEvents, AAGUIDs } = require("./models.ts");
 const crypto = require('crypto').webcrypto;
 const { readFile } = require('node:fs/promises');
 const { resolve } = require('node:path');
 const { setTimeout } = require('node:timers/promises');
 
+//const { operations } = require("electrodb");
 import { type EntityItem } from 'electrodb';
 type UserItem = EntityItem<typeof Users>;
 type AuthItem = EntityItem<typeof Authenticators>;
@@ -50,6 +51,19 @@ type DeleteInfo = {
    userId?: string;
 };
 
+const UnknownUserId = 'unknown';
+
+enum EventNames {
+   AuthOptions = 'AuthOptions',
+   AuthVerify = 'AuthVerify',
+   RegOptions = 'RegOptions',
+   RegVerfiy = 'RegVerfiy',
+   RegDelete = 'RegDelete',
+   PutDescription = 'PutDescription',
+   PutUserName = 'PutUserName',
+   Recover = 'Recover',
+}
+
 const lightFileDefault = 'assets/aaguid/img/default_light.svg'
 const darkFileDefault = 'assets/aaguid/img/default_dark.svg'
 
@@ -71,6 +85,22 @@ function base64Decode(base64: string | undefined): Buffer | undefined {
    return base64 ? Buffer.from(base64, 'base64') : undefined;
 }
 
+
+async function recordEvent(eventName: EventNames, userId: String) {
+   try {
+      const event = await AuthEvents.create({
+         event: eventName,
+         userId: userId
+      }).go();
+
+      if (!event || !event.data) {
+         console.error('event not created');
+      }
+   } catch (error) {
+      // log but eat the error
+      console.error(error);
+   }
+}
 
 async function verifyAuthentication(rpID: string, rpOrigin: string, params: QParams, bodyStr: string): Promise<string> {
    const body = JSON.parse(bodyStr);
@@ -161,6 +191,9 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
          lastLogin: Date.now()
       }).go();
    }
+
+   // Let this happen async
+   recordEvent(EventNames.AuthVerify, user.data.userId);
 
    return JSON.stringify(response);
 }
@@ -279,6 +312,9 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       response.userName = user.data.userName;
    }
 
+   // Let this happen async
+   recordEvent(EventNames.RegVerfiy, user.data.userId);
+
    return JSON.stringify(response);
 }
 
@@ -288,6 +324,7 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
    // the user if forced to pick one on their own. That happens when the user is
    // linked a new device to a existing passkey
    let allowedCreds = undefined;
+   let userId = UnknownUserId;
 
    if (params.userid) {
       const user = await Users.get({
@@ -299,6 +336,8 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
          // so it would take an eternity (and size-large aws bills for me)
          throw new ParamError('user not found')
       }
+
+      userId = user.data.userId;
 
       const auths = await Authenticators.query.byUserId({
          userId: user.data.userId
@@ -326,6 +365,9 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
       await Challenges.create({
          challenge: options.challenge
       }).go();
+
+      // Let this happen async
+      recordEvent(EventNames.AuthOptions, userId);
 
       return JSON.stringify(options);
 
@@ -423,6 +465,9 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
          challenge: options.challenge
       }).go();
 
+      // Let this happen async
+      recordEvent(EventNames.RegOptions, user.data.userId);
+
       return JSON.stringify(options);
    } catch (err) {
       console.error(err);
@@ -455,6 +500,9 @@ async function putDescription(rpID: string, rpOrigin: string, params: QParams, b
       throw new ParamError('description update failed');
    }
 
+   // Let this happen async
+   recordEvent(EventNames.PutDescription, user.data.userId);
+
    return JSON.stringify({
       credentialId: patched.data.credentialId,
       description: body
@@ -482,12 +530,17 @@ async function putUserName(rpID: string, rpOrigin: string, params: QParams, body
       throw new ParamError('username update failed');
    }
 
+   // Let this happen async
+   recordEvent(EventNames.PutUserName, user.data.userId);
+
    return JSON.stringify({
       userId: patched.data.userId,
       userName: body
    });
 }
 
+// Not tracking events for this method since they are frequent and not particlyarly
+// interesting
 async function getAuthenticators(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    const user = await getVerifiedUser(params.userid, params.usercred);
@@ -573,6 +626,9 @@ async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QPara
       delUserId = user.data.userId;
    }
 
+   // Let this happen async
+   recordEvent(EventNames.RegDelete, user.data.userId);
+
    return JSON.stringify({
       credentialId: params.credid,
       userId: delUserId,
@@ -610,6 +666,9 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
    if (!patched || !patched.data) {
       console.error('recovered count update failed');
    }
+
+   // Let this happen async
+   recordEvent(EventNames.Recover, user.data.userId);
 
    // caller should followup with call to verifyRegistration
    return registrationOptions(rpID, rpOrigin, { userid: user.data.userId }, '');
@@ -679,6 +738,12 @@ async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body
    }
 }
 
+/*
+async function cleanse(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+   // One week ago.
+   const olderThan = Date.now() - (7 * 24 * 60 * 60 * 1000);
+   await Users.scan.where( ({}, {})
+}*/
 
 const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QParams, b: string) => Promise<string> } } = {
    GET: {
@@ -695,6 +760,7 @@ const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QPa
       verifyauth: verifyAuthentication,
       recover: recover,
       loadaaguids: loadAAGUIDs, // for internal use, don't add to cloudfront
+//      cleanse: cleanse, // for internal use, don't add to cloudfront
    },
    DELETE: {
       authenticator: deleteAuthenticator,

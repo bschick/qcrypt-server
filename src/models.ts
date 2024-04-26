@@ -1,6 +1,5 @@
 const { Entity } = require("electrodb");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { Buffer } = require("node:buffer");
 
 const client = new DynamoDBClient({
    region: "us-east-1",
@@ -40,7 +39,7 @@ const Users = new Entity(
          createdAt: {
             type: "number",
             default: () => Date.now(),
-            // cannot be modified after created
+            // should not be modified after created
             readOnly: true
          }
       },
@@ -117,7 +116,7 @@ const Authenticators = new Entity(
          createdAt: {
             type: "number",
             default: () => Date.now(),
-            // cannot be modified after created
+            // should not be modified after created
             readOnly: true
          },
          lastLogin: {
@@ -189,6 +188,50 @@ const Challenges = new Entity(
    }
 );
 
+const AuthEvents = new Entity(
+   {
+      model: {
+         entity: "event",
+         version: "1",
+         service: "quickcrypt"
+      },
+      attributes: {
+         event: {
+            type: "string",
+            required: true
+         },
+         userId: {
+            type: "string",
+            required: true
+         },
+         when: {
+            type: "number",
+            default: () => Date.now(),
+            // should not be modified after created
+            readOnly: true
+         }
+      },
+      indexes: {
+         byUser: {
+            pk: {
+               field: "pk",
+               cast: "string",
+               composite: ["userId"]
+            },
+            sk: {
+               field: "sk",
+               cast: "number",
+               composite: ["when"]
+            }
+         }
+      }
+   },
+   {
+      table: "QuickCryptEvents",
+      client: client
+   }
+);
+
 const AAGUIDs = new Entity(
    {
       model: {
@@ -234,3 +277,4 @@ exports.AAGUIDs = AAGUIDs;
 exports.Users = Users;
 exports.Authenticators = Authenticators;
 exports.Challenges = Challenges;
+exports.AuthEvents = AuthEvents;
