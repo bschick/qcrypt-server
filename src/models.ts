@@ -209,7 +209,11 @@ const AuthEvents = new Entity(
             default: () => Date.now(),
             // should not be modified after created
             readOnly: true
-         }
+         },
+         credentialId: {
+            type: "string",
+            required: false
+         },
       },
       indexes: {
          byUser: {

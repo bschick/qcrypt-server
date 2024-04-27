@@ -11,7 +11,6 @@ const { readFile } = require('node:fs/promises');
 const { resolve } = require('node:path');
 const { setTimeout } = require('node:timers/promises');
 
-//const { operations } = require("electrodb");
 import { type EntityItem } from 'electrodb';
 type UserItem = EntityItem<typeof Users>;
 type AuthItem = EntityItem<typeof Authenticators>;
@@ -86,11 +85,12 @@ function base64Decode(base64: string | undefined): Buffer | undefined {
 }
 
 
-async function recordEvent(eventName: EventNames, userId: String) {
+async function recordEvent(eventName: EventNames, userId: String, credentialId: String | undefined = undefined) {
    try {
       const event = await AuthEvents.create({
          event: eventName,
-         userId: userId
+         userId: userId,
+         credentialId: credentialId
       }).go();
 
       if (!event || !event.data) {
@@ -193,7 +193,7 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
    }
 
    // Let this happen async
-   recordEvent(EventNames.AuthVerify, user.data.userId);
+   recordEvent(EventNames.AuthVerify, user.data.userId, authenticator.data.credentialId);
 
    return JSON.stringify(response);
 }
@@ -254,6 +254,8 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       verified: verification.verified
    };
 
+   let credentialId;
+
    if (verification.verified) {
       const {
          aaguid,
@@ -265,6 +267,8 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
          credentialBackedUp,
          origin
       } = verification.registrationInfo;
+
+      credentialId = base64UrlEncode(credentialID);
 
       const aaguidDetails = await AAGUIDs.get({
          aaguid: aaguid
@@ -286,7 +290,7 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       const auth = await Authenticators.create({
          userId: user.data.userId,
          description: description,
-         credentialId: base64UrlEncode(credentialID),
+         credentialId: credentialId,
          credentialPublicKey: base64UrlEncode(credentialPublicKey),
          credentialDeviceType: credentialDeviceType,
          userVerified: userVerified,
@@ -313,7 +317,7 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
    }
 
    // Let this happen async
-   recordEvent(EventNames.RegVerfiy, user.data.userId);
+   recordEvent(EventNames.RegVerfiy, user.data.userId, credentialId);
 
    return JSON.stringify(response);
 }
@@ -322,7 +326,7 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
 
    // If no userid is provided, then we don't return allowed creds and
    // the user if forced to pick one on their own. That happens when the user is
-   // linked a new device to a existing passkey
+   // linking a new device to a existing passkey or has fully signed out
    let allowedCreds = undefined;
    let userId = UnknownUserId;
 
@@ -366,7 +370,8 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
          challenge: options.challenge
       }).go();
 
-      // Let this happen async
+      // Let this happen async. Don't report a credentialId since
+      // there could be none or multiple
       recordEvent(EventNames.AuthOptions, userId);
 
       return JSON.stringify(options);
@@ -383,7 +388,7 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
    let user: any;
 
    if (params.userid) {
-      // means this is an known user who is creating a new credential cannot
+      // means this is a known user who is creating a new credential cannot
       // specify a new username
       if (params.username) {
          throw new ParamError('cannot specify username for existing user');
@@ -501,7 +506,7 @@ async function putDescription(rpID: string, rpOrigin: string, params: QParams, b
    }
 
    // Let this happen async
-   recordEvent(EventNames.PutDescription, user.data.userId);
+   recordEvent(EventNames.PutDescription, user.data.userId, params.credid);
 
    return JSON.stringify({
       credentialId: patched.data.credentialId,
@@ -627,7 +632,7 @@ async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QPara
    }
 
    // Let this happen async
-   recordEvent(EventNames.RegDelete, user.data.userId);
+   recordEvent(EventNames.RegDelete, user.data.userId, params.credid);
 
    return JSON.stringify({
       credentialId: params.credid,
@@ -738,12 +743,34 @@ async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body
    }
 }
 
-/*
+
 async function cleanse(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
-   // One week ago.
-   const olderThan = Date.now() - (7 * 24 * 60 * 60 * 1000);
-   await Users.scan.where( ({}, {})
-}*/
+
+   const days = 7;
+   const olderThan = Date.now() - (days * 24 * 60 * 60 * 1000);
+
+   const results = await Users.scan.where(({ verified, createdAt }, { eq, lt }) =>
+      `${eq(verified, false)} AND ${lt(createdAt, olderThan)}`
+   ).go({ attributes: ['userId'] });
+
+   if (results && results.data) {
+      console.log(`removing ${results.data.length} unverified users more than ${days} old`);
+
+      for (let user of results.data) {
+         const deleted = await Users.delete({
+            userId: user.userId
+         }).go();
+
+         if (!deleted || !deleted.data) {
+            console.error('failed to delete ' + user.userId);
+         }
+      }
+   } else {
+      console.error('no results');
+   }
+
+   return 'done';
+}
 
 const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QParams, b: string) => Promise<string> } } = {
    GET: {
@@ -760,7 +787,7 @@ const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QPa
       verifyauth: verifyAuthentication,
       recover: recover,
       loadaaguids: loadAAGUIDs, // for internal use, don't add to cloudfront
-//      cleanse: cleanse, // for internal use, don't add to cloudfront
+      cleanse: cleanse, // for internal use, don't add to cloudfront
    },
    DELETE: {
       authenticator: deleteAuthenticator,
@@ -780,7 +807,7 @@ function response(body: string, status: number): { [key: string]: string | numbe
 async function handler(event: any, context: any) {
 
    // Uncomment for temporary debuging only, since this logs user credentials
-   //   console.log(event);
+   // console.log(event);
 
    if (!event || !event['requestContext' ||
       !event['requestContext']['http']] || !event['headers'] ||
