@@ -115,13 +115,7 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       throw new ParamError('missing challenge reply');
    }
 
-   const user = await Users.get({
-      userId: body.response.userHandle
-   }).go();
-
-   if (!user || !user.data) {
-      throw new ParamError('user not found')
-   }
+   const user = await getUnVerifiedUser(body.response.userHandle);
 
    // Make sure this is a challenge the server really issued and that it is
    // not outdated. Once validated, it's removed to prevent reuse. Note that
@@ -208,13 +202,7 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       throw new ParamError('missing challenge reply');
    }
 
-   const user = await Users.get({
-      userId: body.userId,
-   }).go();
-
-   if (!user || !user.data) {
-      throw new ParamError('user not found')
-   }
+   const user = await getUnVerifiedUser(body.userId);
 
    // Make sure this is a challenge the server really issued and that it is
    // not outdated. Once validated, remove to prevent reuse
@@ -331,15 +319,9 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
    let userId = UnknownUserId;
 
    if (params.userid) {
-      const user = await Users.get({
-         userId: params.userid,
-      }).go();
-
-      if (!user || !user.data) {
-         // Callers could use this to guess userids, but userid is 128bits psuedo-random,
-         // so it would take an eternity (and size-large aws bills for me)
-         throw new ParamError('user not found')
-      }
+      // Callers could use this to guess userids, but userid is 128bits psuedo-random,
+      // so it would take an eternity (and size-large aws bills for me)
+      const user = await getUnVerifiedUser(params.userid);
 
       userId = user.data.userId;
 
@@ -394,9 +376,7 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
          throw new ParamError('cannot specify username for existing user');
       }
 
-      user = await Users.get({
-         userId: params.userid
-      }).go();
+      user = await getVerifiedUser(params.userid, params.usercred);
 
    } else {
       // Totally new users, must provide a username
@@ -682,11 +662,34 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
 // TODO make better use of ElectodB types for return...
 async function getVerifiedUser(userId: string, userCred: string): Promise<any> {
 
-   if (!userId) {
-      throw new ParamError('missing userid');
-   }
    if (!userCred) {
       throw new ParamError('missing userCred');
+   }
+
+   const user = await getUnVerifiedUser(userId);
+
+   if (user.data.userCred != userCred) {
+      // vague error to make guessing harder
+      throw new ParamError('user or userCred not found')
+   }
+
+   return user;
+}
+
+// Currently origin is stored on each Authenticator, but it isn't used (other
+// than within passkwy library signature test).
+// Consider if rpOrigin should be moved from being per Authenticator to
+// per User. This wouldn't no be more secure, but it might prevent errors during
+// development if a real users data was used in a test region.
+// If origin is moved to user, then we could add a test here to confirm the
+// original user origin is  used for all following actions.
+//
+// TODO make better use of ElectodB types for return...
+//
+async function getUnVerifiedUser(userId: string): Promise<any> {
+
+   if (!userId) {
+      throw new ParamError('missing userid');
    }
 
    const user = await Users.get({
@@ -698,14 +701,8 @@ async function getVerifiedUser(userId: string, userCred: string): Promise<any> {
       throw new ParamError('user or userCred not found')
    }
 
-   if (user.data.userCred != userCred) {
-      // vague error to make guessing harder
-      throw new ParamError('user or userCred not found')
-   }
-
    return user;
 }
-
 
 async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
@@ -821,8 +818,17 @@ async function handler(event: any, context: any) {
       rpOrigin += `:${event['headers']['x-passkey-port']}`;
    }
 
-   const method: string = event['requestContext']['http']['method'].toUpperCase();
-   const resource: string = event['requestContext']['http']['path'].replace(/\//g, '').toLowerCase();
+   var method: string;
+   var resource: string;
+
+   try {
+      method = event['requestContext']['http']['method'].toUpperCase();
+      resource = event['requestContext']['http']['path'].replace(/\//g, '').toLowerCase();
+   } catch (err) {
+      console.error(err);
+      return response('invalid http request', 400);
+   }
+
    let body = '';
    if ('body' in event) {
       body = event['body'];
