@@ -153,7 +153,7 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       credentialID: base64UrlDecode(authenticator.data.credentialId),
       count: 0, // not using counters
       transports: authenticator.data.transports
-   }
+   };
 
    let verification;
    try {
@@ -313,7 +313,7 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
 async function authenticationOptions(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
    // If no userid is provided, then we don't return allowed creds and
-   // the user if forced to pick one on their own. That happens when the user is
+   // the user is forced to pick one on their own. That happens when the user is
    // linking a new device to a existing passkey or has fully signed out
    let allowedCreds = undefined;
    let userId = UnknownUserId;
@@ -679,10 +679,10 @@ async function getVerifiedUser(userId: string, userCred: string): Promise<any> {
 // Currently origin is stored on each Authenticator, but it isn't used (other
 // than within passkwy library signature test).
 // Consider if rpOrigin should be moved from being per Authenticator to
-// per User. This wouldn't no be more secure, but it might prevent errors during
+// per User. This wouldn't be more secure, but it might prevent errors during
 // development if a real users data was used in a test region.
 // If origin is moved to user, then we could add a test here to confirm the
-// original user origin is  used for all following actions.
+// original user origin is used for all following actions.
 //
 // TODO make better use of ElectodB types for return...
 //
