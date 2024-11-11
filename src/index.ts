@@ -115,7 +115,7 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       throw new ParamError('missing challenge reply');
    }
 
-   const user = await getUnVerifiedUser(body.response.userHandle);
+   const user = await getUnVerifiedUser(body.response.userHandle!);
 
    // Make sure this is a challenge the server really issued and that it is
    // not outdated. Once validated, it's removed to prevent reuse. Note that
@@ -139,6 +139,7 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       throw new ParamError('authentication timeout, try again');
    }
 
+   // SimpleWebAuthn renamed these to WebAuthnCredential, so now we have a name missmatch
    const authenticator = await Authenticators.get({
       userId: user.data.userId,
       credentialId: body.id
@@ -148,9 +149,9 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       throw new ParamError('authenticator not found');
    }
 
-   const authenticatorDevice = {
-      credentialPublicKey: base64UrlDecode(authenticator.data.credentialPublicKey),
-      credentialID: base64UrlDecode(authenticator.data.credentialId),
+   const webAuthnCredential = {
+      publicKey: base64UrlDecode(authenticator.data.credentialPublicKey),
+      id: authenticator.data.credentialId,
       count: 0, // not using counters
       transports: authenticator.data.transports
    };
@@ -162,7 +163,7 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
          expectedChallenge: challenge.data.challenge,
          expectedOrigin: rpOrigin,
          expectedRPID: rpID,
-         authenticator: authenticatorDevice
+         credential: webAuthnCredential
       });
    } catch (error) {
       console.error(error);
@@ -242,13 +243,12 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       verified: verification.verified
    };
 
-   let credentialId;
+   let eventCredId;
 
    if (verification.verified) {
       const {
          aaguid,
-         credentialID,
-         credentialPublicKey,
+         credential,
          attestationObject,
          userVerified,
          credentialDeviceType,
@@ -256,7 +256,12 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
          origin
       } = verification.registrationInfo;
 
-      credentialId = base64UrlEncode(credentialID);
+      const {
+         id,
+         publicKey,
+      } = credential;
+
+      eventCredId = id;
 
       const aaguidDetails = await AAGUIDs.get({
          aaguid: aaguid
@@ -275,11 +280,12 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
          console.error('aaguid ' + aaguid + ' not found');
       }
 
+      // SimpleWebAuthen renamed these to WebAuthnCredential, now we have a missmatch
       const auth = await Authenticators.create({
          userId: user.data.userId,
          description: description,
-         credentialId: credentialId,
-         credentialPublicKey: base64UrlEncode(credentialPublicKey),
+         credentialId: id,
+         credentialPublicKey: base64UrlEncode(publicKey),
          credentialDeviceType: credentialDeviceType,
          userVerified: userVerified,
          credentialBackedUp: credentialBackedUp,
@@ -305,7 +311,7 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
    }
 
    // Let this happen async
-   recordEvent(EventNames.RegVerfiy, user.data.userId, credentialId);
+   recordEvent(EventNames.RegVerfiy, user.data.userId, eventCredId);
 
    return JSON.stringify(response);
 }
@@ -335,7 +341,7 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
       }
 
       allowedCreds = auths.data.map((cred: AuthItem) => ({
-         id: base64UrlDecode(cred.credentialId),
+         id: cred.credentialId,
          type: 'public-key',
          transports: cred.transports,
       }));
@@ -400,7 +406,8 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
       // Loop in the very unlikley event that we randomly pick
       // a duplicate (out of 3.4e38 possible)
       for (let i = 0; i < RETRIES; ++i) {
-         uId = base64UrlEncode(randData.slice(i * ID_BYTES, (i + 1) * ID_BYTES))!;
+         const uIdBytes = randData.slice(i * ID_BYTES, (i + 1) * ID_BYTES);
+         uId = base64UrlEncode(uIdBytes);
 
          const users = await Users.query.byUserId({
             userId: uId
@@ -435,7 +442,7 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
       const options = await generateRegistrationOptions({
          rpName: RPNAME,
          rpID: rpID,
-         userID: user.data.userId,
+         userID: base64UrlDecode(user.data.userId),
          userName: user.data.userName,
          attestationType: 'none',
          userVerification: 'preferred',
@@ -656,7 +663,12 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
    recordEvent(EventNames.Recover, user.data.userId);
 
    // caller should followup with call to verifyRegistration
-   return registrationOptions(rpID, rpOrigin, { userid: user.data.userId }, '');
+   return registrationOptions(
+      rpID,
+      rpOrigin,
+      { userid: user.data.userId, usercred: params.usercred},
+      ''
+   );
 }
 
 // TODO make better use of ElectodB types for return...
@@ -806,8 +818,8 @@ async function handler(event: any, context: any) {
    // Uncomment for temporary debuging only, since this logs user credentials
    // console.log(event);
 
-   if (!event || !event['requestContext' ||
-      !event['requestContext']['http']] || !event['headers'] ||
+   if (!event || !event['requestContext'] ||
+      !event['requestContext']['http'] || !event['headers'] ||
       !event['headers']['x-passkey-rpid']) {
       return response("invalid request, missing context", 400);
    }
@@ -818,8 +830,8 @@ async function handler(event: any, context: any) {
       rpOrigin += `:${event['headers']['x-passkey-port']}`;
    }
 
-   var method: string;
-   var resource: string;
+   let method: string;
+   let resource: string;
 
    try {
       method = event['requestContext']['http']['method'].toUpperCase();
