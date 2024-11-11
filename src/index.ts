@@ -639,9 +639,9 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
    }).go({ attributes: ['userId', 'credentialId'] });
 
    // Note that if the creation of a new passkey is aborted or cancels, the account
-   // will be left with no passkeys. Could address this by marking passkey for
-   // deletion and cleaning up after, but then recovery may be less certain in
-   // a security incident.
+   // will be left with no passkeys. Recovery can be run again to create a new passkey
+   // Could alternatively address this by marking passkey for deletion and cleaning
+   //up after, but then recovery may be less certain in a security incident.
    if (auths && auths.data.length != 0) {
       const deleted = await Authenticators.delete(auths.data).go();
    }
@@ -809,15 +809,14 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
             }
          }
 
-         if (auths.cursor) {
-            auths = await Authenticators.scan.go({
-               attributes: ["userId", "credentialId"],
-               limit: batchSize,
-               cursor: auths.cursor
-            });
-         } else {
-            auths = undefined;
+         if (!auths.cursor) {
+            break;
          }
+         auths = await Authenticators.scan.go({
+            attributes: ["userId", "credentialId"],
+            limit: batchSize,
+            cursor: auths.cursor
+         });
       }
 
       console.log(`${total} auths, with ${leaked} leaked`);
@@ -837,13 +836,12 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
          total += users.data.length;
 
          for (let user of users.data) {
-
             // fake user to prevent Id use
-            if(user.userId == 'AAAAAAAAAAAAAAAAAAAAAA') {
+            if (user.userId == 'AAAAAAAAAAAAAAAAAAAAAA') {
                continue;
             }
 
-            if(user.verified) {
+            if (user.verified) {
                const auths = await Authenticators.query.byUserId({
                   userId: user.userId
                }).go({ attributes: ['credentialId'] });
@@ -857,15 +855,14 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
             }
          }
 
-         if (users.cursor) {
-            users = await Users.scan.go({
-               attributes: ["userId", "verified", "userName"],
-               limit: batchSize,
-               cursor: users.cursor
-            });
-         } else {
-            users = undefined;
+         if (!users.cursor) {
+            break;
          }
+         users = await Users.scan.go({
+            attributes: ["userId", "verified", "userName"],
+            limit: batchSize,
+            cursor: users.cursor
+         });
       }
 
       console.log(`${total} users total, with ${leaked} leaked, and ${unverified} unverified`);
