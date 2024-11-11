@@ -1,4 +1,5 @@
 #! /usr/bin/env python3
+import binascii
 import os
 import sys
 import shutil
@@ -51,12 +52,21 @@ with open(inputFile, 'r') as fin:
 
         # ignoring the dafaults may be written multiple times
         try:
+            darkData = []
             if darkTypeSvg:
-                darkData = base64.standard_b64decode(darkB64).decode()
+                try:
+                    darkData = base64.standard_b64decode(darkB64).decode()
+                except binascii.Error:
+                    darkData = base64.standard_b64decode(darkB64 + '==').decode()
                 with open(darkFile, 'w') as fdark:
                     fdark.write(darkData)
             else:
-                darkData = base64.standard_b64decode(darkB64)
+                try:
+                    darkData = base64.standard_b64decode(darkB64)
+                except binascii.Error:
+                    # try with extra padding (sometimes missing)
+                    darkData = base64.standard_b64decode(darkB64 + '==')
+
                 with open(darkFile, 'wb') as fdark:
                     fdark.write(darkData)
         except Exception as err:
@@ -65,12 +75,19 @@ with open(inputFile, 'r') as fin:
             sys.exit(1)
 
         try:
+            lightData = []
             if lightTypeSvg:
-                lightData = base64.standard_b64decode(lightB64).decode()
+                try:
+                    lightData = base64.standard_b64decode(lightB64).decode()
+                except binascii.Error:
+                    lightData = base64.standard_b64decode(lightB64 + '==').decode()
                 with open(lightFile, 'w') as flight:
                     flight.write(lightData)
             else:
-                lightData = base64.standard_b64decode(lightB64)
+                try:
+                    lightData = base64.standard_b64decode(lightB64)
+                except binascii.Error:
+                    lightData = base64.standard_b64decode(lightB64 + '==')
                 with open(lightFile, 'wb') as flight:
                     flight.write(lightData)
         except Exception as err:
