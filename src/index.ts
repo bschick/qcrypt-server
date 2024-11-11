@@ -666,7 +666,7 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
    return registrationOptions(
       rpID,
       rpOrigin,
-      { userid: user.data.userId, usercred: params.usercred},
+      { userid: user.data.userId, usercred: params.usercred },
       ''
    );
 }
@@ -755,7 +755,7 @@ async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body
 
 async function cleanse(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
-   const days = 7;
+   const days = 15;
    const olderThan = Date.now() - (days * 24 * 60 * 60 * 1000);
 
    const results = await Users.scan.where(({ verified, createdAt }, { eq, lt }) =>
@@ -775,10 +775,103 @@ async function cleanse(rpID: string, rpOrigin: string, params: QParams, body: st
          }
       }
    } else {
-      console.error('no results');
+      console.log('nothing to remove');
    }
 
    return 'done';
+}
+
+async function consistency(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+
+   const batchSize = 14;
+
+   if (!params['table'] || params.table == 'authenticators') {
+
+      let auths = await Authenticators.scan.go({
+         attributes: ["userId", "credentialId"],
+         limit: batchSize
+      });
+
+      let total = 0;
+      let leaked = 0;
+
+      while (auths && auths.data && auths.data.length > 0) {
+         total += auths.data.length;
+
+         for (let auth of auths.data) {
+            const user = await Users.get({
+               userId: auth.userId
+            }).go({ attributes: ['userId'] });
+
+            if (!user || !user.data) {
+               console.error(`missing userId ${auth.userId} for auth ${auth.credentialId}`);
+               leaked += 1;
+            }
+         }
+
+         if (auths.cursor) {
+            auths = await Authenticators.scan.go({
+               attributes: ["userId", "credentialId"],
+               limit: batchSize,
+               cursor: auths.cursor
+            });
+         } else {
+            auths = undefined;
+         }
+      }
+
+      console.log(`${total} auths, with ${leaked} leaked`);
+
+   } else if (params.table == 'users') {
+
+      let users = await Users.scan.go({
+         attributes: ["userId", "verified", "userName"],
+         limit: batchSize
+      });
+
+      let total = 0;
+      let unverified = 0;
+      let leaked = 0;
+
+      while (users && users.data && users.data.length > 0) {
+         total += users.data.length;
+
+         for (let user of users.data) {
+
+            // fake user to prevent Id use
+            if(user.userId == 'AAAAAAAAAAAAAAAAAAAAAA') {
+               continue;
+            }
+
+            if(user.verified) {
+               const auths = await Authenticators.query.byUserId({
+                  userId: user.userId
+               }).go({ attributes: ['credentialId'] });
+
+               if (!auths || auths.data.length == 0) {
+                  console.error(`no credentials for user ${user.userId}, ${user.userName}`);
+                  leaked += 1;
+               }
+            } else {
+               unverified += 1;
+            }
+         }
+
+         if (users.cursor) {
+            users = await Users.scan.go({
+               attributes: ["userId", "verified", "userName"],
+               limit: batchSize,
+               cursor: users.cursor
+            });
+         } else {
+            users = undefined;
+         }
+      }
+
+      console.log(`${total} users total, with ${leaked} leaked, and ${unverified} unverified`);
+   }
+
+   return "done";
 }
 
 const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QParams, b: string) => Promise<string> } } = {
@@ -797,6 +890,7 @@ const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QPa
       recover: recover,
       loadaaguids: loadAAGUIDs, // for internal use, don't add to cloudfront
       cleanse: cleanse, // for internal use, don't add to cloudfront
+      consistency: consistency  // for internal use, don't add to cloudfront
    },
    DELETE: {
       authenticator: deleteAuthenticator,
