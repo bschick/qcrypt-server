@@ -4,9 +4,15 @@ const {
    generateRegistrationOptions,
    verifyRegistrationResponse,
 } = require('@simplewebauthn/server');
+const {
+   Users,
+   Authenticators,
+   Challenges,
+   AuthEvents,
+   Validators,
+   AAGUIDs } = require("./models.ts");
 const { Buffer } = require("node:buffer");
-const { Users, Authenticators, Challenges, AuthEvents, AAGUIDs } = require("./models.ts");
-const crypto = require('crypto').webcrypto;
+const { createHash, randomBytes } = require('node:crypto');
 const { readFile } = require('node:fs/promises');
 const { resolve } = require('node:path');
 const { setTimeout } = require('node:timers/promises');
@@ -15,6 +21,7 @@ import { type EntityItem } from 'electrodb';
 type UserItem = EntityItem<typeof Users>;
 type AuthItem = EntityItem<typeof Authenticators>;
 
+const HASHALG = 'blake2s256';
 
 type QParams = {
    [key: string]: string;
@@ -295,12 +302,32 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
          attestationObject: base64UrlEncode(attestationObject),
       }).go();
 
+      if (!auth || !auth.data) {
+         throw new ParamError('credentail creations failed');
+      }
 
       await Users.patch({
          userId: user.data.userId,
       }).set({
          verified: true
       }).go();
+
+      const hash = createHash(HASHALG);
+      hash.update(user.data.userId);
+      hash.update(user.data.userCred);
+
+      // This allows us to recreate a deleted User is someone has a recovery link
+      // Currently not allowed, but re-creation may be added later (automatically
+      // or manually), and keeping a hash of the userId and userCred ensure we
+      // don't accept invalid recovery parameters.
+      const validator = await Validators.put({
+         hash: hash.digest('hex')
+      }).go({ response: 'none' });
+
+      if (!validator || !validator.data) {
+         // should do some cleanup...
+         throw new ParamError('validator creations failed');
+      }
 
       response.userCred = user.data.userCred;
       response.description = description;
@@ -401,7 +428,7 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
 
       // Reduce round-trips by getting enough data for 3 x 16 bytes ID tries
       // and 1 x 32 bytes userCred
-      const randData = crypto.getRandomValues(new Uint8Array(RETRIES * ID_BYTES + USERCRED_BYTES));
+      const randData = randomBytes(RETRIES * ID_BYTES + USERCRED_BYTES);
 
       // Loop in the very unlikley event that we randomly pick
       // a duplicate (out of 3.4e38 possible)
@@ -632,16 +659,48 @@ async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QPara
 // with a call to verifyRegistration
 async function recover(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
+   // Ensure recovery link is valid
+   const hash = createHash(HASHALG);
+   hash.update(params.userid);
+   hash.update(params.usercred);
+
+   const validator = await Validators.get({
+      hash: hash.digest("hex")
+   }).go();
+
+   if (!validator || !validator.data) {
+      throw new ParamError('invalid recovery values')
+   }
+
+   // Currently, require an existing user for recovery
    const user = await getVerifiedUser(params.userid, params.usercred);
+
+   /* Use the follow To support automatic user re-creation
+    *
+   let user: any;
+   try {
+      user = await getVerifiedUser(params.userid, params.usercred);
+   } catch (err) {
+      if (!(err instanceof ParamError)) {
+         throw err;
+      }
+
+      // Recreate a user since there are valid (previously known) recovery values
+      user = await Users.create({
+         userId: params.userid,
+         userName: 'Placeholder',
+         userCred:  params.usercred
+      }).go();
+   } */
 
    const auths = await Authenticators.query.byUserId({
       userId: user.data.userId
    }).go({ attributes: ['userId', 'credentialId'] });
 
    // Note that if the creation of a new passkey is aborted or cancels, the account
-   // will be left with no passkeys. Recovery can be run again to create a new passkey
+   // will be left with no passkeys. Recovery can be run again to create a new passkey.
    // Could alternatively address this by marking passkey for deletion and cleaning
-   //up after, but then recovery may be less certain in a security incident.
+   // up after, but then recovery may be less certain in a security incident.
    if (auths && auths.data.length != 0) {
       const deleted = await Authenticators.delete(auths.data).go();
    }
@@ -666,7 +725,7 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
    return registrationOptions(
       rpID,
       rpOrigin,
-      { userid: user.data.userId, usercred: params.usercred },
+      { userid: user.data.userId, usercred: user.data.userCred },
       ''
    );
 }
@@ -787,8 +846,9 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
 
    if (!params['table'] || params.table == 'authenticators') {
 
+      const authAttrs = ["userId", "credentialId"];
       let auths = await Authenticators.scan.go({
-         attributes: ["userId", "credentialId"],
+         attributes: authAttrs,
          limit: batchSize
       });
 
@@ -813,7 +873,7 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
             break;
          }
          auths = await Authenticators.scan.go({
-            attributes: ["userId", "credentialId"],
+            attributes: authAttrs,
             limit: batchSize,
             cursor: auths.cursor
          });
@@ -823,8 +883,9 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
 
    } else if (params.table == 'users') {
 
+      const userAttrs = ["userId", "verified", "userName"];
       let users = await Users.scan.go({
-         attributes: ["userId", "verified", "userName"],
+         attributes: userAttrs,
          limit: batchSize
       });
 
@@ -859,7 +920,7 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
             break;
          }
          users = await Users.scan.go({
-            attributes: ["userId", "verified", "userName"],
+            attributes: userAttrs,
             limit: batchSize,
             cursor: users.cursor
          });
@@ -868,6 +929,48 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
       console.log(`${total} users total, with ${leaked} leaked, and ${unverified} unverified`);
    }
 
+   return "done";
+}
+
+async function patch(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+
+   const batchSize = 14;
+
+   const userAttrs = ["userId", "userCred"];
+   let users = await Users.scan.go({
+      attributes: userAttrs,
+      limit: batchSize
+   });
+
+   let total = 0;
+   while (users && users.data && users.data.length > 0) {
+
+      for (let user of users.data) {
+         if (user.userId == "AAAAAAAAAAAAAAAAAAAAAA") {
+            continue;
+         }
+         const hash = createHash(HASHALG);
+         hash.update(user.userId);
+         hash.update(user.userCred);
+
+         await Validators.put({
+            hash: hash.digest("hex")
+         }).go({ response: "none" });
+
+         total += 1;
+      }
+
+      if (!users.cursor) {
+         break;
+      }
+      users = await Users.scan.go({
+         attributes: userAttrs,
+         limit: batchSize,
+         cursor: users.cursor
+      });
+   }
+
+   console.log(`${total} users updated`);
    return "done";
 }
 
@@ -887,7 +990,8 @@ const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QPa
       recover: recover,
       loadaaguids: loadAAGUIDs, // for internal use, don't add to cloudfront
       cleanse: cleanse, // for internal use, don't add to cloudfront
-      consistency: consistency  // for internal use, don't add to cloudfront
+      consistency: consistency,  // for internal use, don't add to cloudfront
+      patch: patch  // for internal use, temporary function whose purpose can change
    },
    DELETE: {
       authenticator: deleteAuthenticator,

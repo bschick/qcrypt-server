@@ -188,6 +188,42 @@ const Challenges = new Entity(
    }
 );
 
+
+const Validators = new Entity(
+   {
+      model: {
+         entity: "validator",
+         version: "1",
+         service: "quickcrypt"
+      },
+      attributes: {
+         hash: {
+            type: "string",
+            required: true
+         },
+         createdAt: {
+            type: "number",
+            default: () => Date.now(),
+            // should not be modified after created
+            readOnly: true
+         }
+      },
+      indexes: {
+         byValidator: {
+            pk: {
+               field: "pk",
+               cast: "string",
+               composite: ["hash"]
+            }
+         }
+      }
+   },
+   {
+      table: "QuickCryptValidators",
+      client: client
+   }
+);
+
 const AuthEvents = new Entity(
    {
       model: {
@@ -282,3 +318,4 @@ exports.Users = Users;
 exports.Authenticators = Authenticators;
 exports.Challenges = Challenges;
 exports.AuthEvents = AuthEvents;
+exports.Validators = Validators;
