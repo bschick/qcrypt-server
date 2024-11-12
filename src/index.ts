@@ -934,43 +934,6 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
 
 async function patch(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
 
-   const batchSize = 14;
-
-   const userAttrs = ["userId", "userCred"];
-   let users = await Users.scan.go({
-      attributes: userAttrs,
-      limit: batchSize
-   });
-
-   let total = 0;
-   while (users && users.data && users.data.length > 0) {
-
-      for (let user of users.data) {
-         if (user.userId == "AAAAAAAAAAAAAAAAAAAAAA") {
-            continue;
-         }
-         const hash = createHash(HASHALG);
-         hash.update(user.userId);
-         hash.update(user.userCred);
-
-         await Validators.put({
-            hash: hash.digest("hex")
-         }).go({ response: "none" });
-
-         total += 1;
-      }
-
-      if (!users.cursor) {
-         break;
-      }
-      users = await Users.scan.go({
-         attributes: userAttrs,
-         limit: batchSize,
-         cursor: users.cursor
-      });
-   }
-
-   console.log(`${total} users updated`);
    return "done";
 }
 
