@@ -303,7 +303,7 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       }).go();
 
       if (!auth || !auth.data) {
-         throw new ParamError('credentail creations failed');
+         throw new ParamError('credentail creation failed');
       }
 
       await Users.patch({
@@ -322,11 +322,11 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       // don't accept invalid recovery parameters.
       const validator = await Validators.put({
          hash: hash.digest('hex')
-      }).go({ response: 'none' });
+      }).go();
 
       if (!validator || !validator.data) {
          // should do some cleanup...
-         throw new ParamError('validator creations failed');
+         console.error('validator creation failed');
       }
 
       response.userCred = user.data.userCred;
