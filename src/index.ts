@@ -21,8 +21,6 @@ import { type EntityItem } from 'electrodb';
 type UserItem = EntityItem<typeof Users>;
 type AuthItem = EntityItem<typeof Authenticators>;
 
-const HASHALG = 'blake2s256';
-
 type QParams = {
    [key: string]: string;
 }
@@ -75,6 +73,11 @@ const darkFileDefault = 'assets/aaguid/img/default_dark.svg'
 
 const RPNAME = 'Quick Crypt';
 const ALGIDS = [24, 7, 3, 1, -7, -257];
+
+const HASHALG = 'blake2s256';
+
+const USERID_BYTES = 16;
+const USERCRED_BYTES = 32;
 
 class ParamError extends Error {
 }
@@ -423,17 +426,15 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
       let uId: string | undefined;
 
       const RETRIES = 3;
-      const ID_BYTES = 16;
-      const USERCRED_BYTES = 32;
 
       // Reduce round-trips by getting enough data for 3 x 16 bytes ID tries
       // and 1 x 32 bytes userCred
-      const randData = randomBytes(RETRIES * ID_BYTES + USERCRED_BYTES);
+      const randData = randomBytes(RETRIES * USERID_BYTES + USERCRED_BYTES);
 
       // Loop in the very unlikley event that we randomly pick
       // a duplicate (out of 3.4e38 possible)
       for (let i = 0; i < RETRIES; ++i) {
-         const uIdBytes = randData.slice(i * ID_BYTES, (i + 1) * ID_BYTES);
+         const uIdBytes = randData.slice(i * USERID_BYTES, (i + 1) * USERID_BYTES);
          uId = base64UrlEncode(uIdBytes);
 
          const users = await Users.query.byUserId({
@@ -451,7 +452,7 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
          throw new Error('could not allocate userId');
       }
 
-      const userCred = randData.slice(RETRIES * ID_BYTES, RETRIES * ID_BYTES + USERCRED_BYTES);
+      const userCred = randData.slice(RETRIES * USERID_BYTES, RETRIES * USERID_BYTES + USERCRED_BYTES);
       const b64Key = base64UrlEncode(userCred);
 
       user = await Users.create({
@@ -817,6 +818,7 @@ async function cleanse(rpID: string, rpOrigin: string, params: QParams, body: st
    const days = 15;
    const olderThan = Date.now() - (days * 24 * 60 * 60 * 1000);
 
+   //@ts-ignore
    const results = await Users.scan.where(({ verified, createdAt }, { eq, lt }) =>
       `${eq(verified, false)} AND ${lt(createdAt, olderThan)}`
    ).go({ attributes: ['userId'] });
