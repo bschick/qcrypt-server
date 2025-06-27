@@ -16,7 +16,8 @@ const { createHash, randomBytes } = require('node:crypto');
 const { readFile } = require('node:fs/promises');
 const { resolve } = require('node:path');
 const { setTimeout } = require('node:timers/promises');
-
+const { generateMnemonic, mnemonicToEntropy } = require('@scure/bip39');
+const { wordlist } = require('@scure/bip39/wordlists/english');
 import { type EntityItem } from 'electrodb';
 type UserItem = EntityItem<typeof Users>;
 type AuthItem = EntityItem<typeof Authenticators>;
@@ -30,6 +31,7 @@ type RegistrationInfo = {
    userCred?: string;
    userId?: string;
    userName?: string;
+   recoveryId?: string;
    lightIcon?: string;
    darkIcon?: string;
    description?: string;
@@ -43,11 +45,13 @@ type AuthenticatorInfo = {
    name: string;
 };
 
-type AuthenticationInfo = {
+type UserInfo = {
    verified: boolean;
    userCred?: string;
    userId?: string;
    userName?: string;
+   recoveryId?: string;
+   authenticators?: AuthenticatorInfo[];
 };
 
 type DeleteInfo = {
@@ -65,6 +69,7 @@ enum EventNames {
    RegDelete = 'RegDelete',
    PutDescription = 'PutDescription',
    PutUserName = 'PutUserName',
+   ReplaceRecovery = 'ReplaceRecovery',
    Recover = 'Recover',
 }
 
@@ -180,14 +185,17 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       throw new ParamError('invalid authorizatoin');
    }
 
-   let response: AuthenticationInfo = {
+   let response: UserInfo = {
       verified: verification.verified
    };
 
    if (verification.verified) {
+      const authenticators = await loadAuthenticators(user);
       response.userCred = user.data.userCred;
       response.userId = user.data.userId;
       response.userName = user.data.userName;
+      response.recoveryId = user.data.recoveryId;
+      response.authenticators = authenticators;
 
       const patched = await Authenticators.patch({
          userId: authenticator.data.userId,
@@ -338,6 +346,7 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       response.darkIcon = darkIcon;
       response.userId = user.data.userId;
       response.userName = user.data.userName;
+      response.recoveryId = user.data.recoveryId;
    }
 
    // Let this happen async
@@ -455,10 +464,15 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
       const userCred = randData.slice(RETRIES * USERID_BYTES, RETRIES * USERID_BYTES + USERCRED_BYTES);
       const b64Key = base64UrlEncode(userCred);
 
+      const mn = generateMnemonic(wordlist, 128);
+      const id = mnemonicToEntropy(mn, wordlist);
+      const recoveryId = base64UrlEncode(id);
+
       user = await Users.create({
          userId: uId,
          userName: params.username,
-         userCred: b64Key
+         userCred: b64Key,
+         recoveryId: recoveryId
       }).go();
    }
 
@@ -551,7 +565,7 @@ async function putUserName(rpID: string, rpOrigin: string, params: QParams, body
    }
 
    // Let this happen async
-   recordEvent(EventNames.PutUserName, user.data.userId);
+   recordEvent(EventNames.PutUserName, user.data.userId, user.data.userCred);
 
    return JSON.stringify({
       userId: patched.data.userId,
@@ -559,18 +573,70 @@ async function putUserName(rpID: string, rpOrigin: string, params: QParams, body
    });
 }
 
+async function replaceRecovery(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+
+   const user = await getVerifiedUser(params.userid, params.usercred);
+
+   const mn = generateMnemonic(wordlist, 128);
+   const id = mnemonicToEntropy(mn, wordlist);
+   const recoveryId = base64UrlEncode(id);
+
+   const patched = await Users.patch({
+      userId: user.data.userId,
+   }).set({
+      recoveryId: recoveryId
+   }).go();
+
+   if (!patched || !patched.data) {
+      throw new ParamError('recovery update failed');
+   }
+
+   // Let this happen async
+   recordEvent(EventNames.ReplaceRecovery, user.data.userId, user.data.userCred)
+
+   return JSON.stringify({
+      userId: patched.data.userId,
+      recoveryId: recoveryId
+   });
+}
+
+// Not tracking events for this method since they are frequent and not particlyarly
+// interesting
+async function getUserInfo(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+
+   const user = await getVerifiedUser(params.userid, params.usercred);
+   const authenticators = await loadAuthenticators(user);
+
+   const response: UserInfo = {
+      verified: user.data.verfified,
+      userCred: user.data.userCred,
+      userId: user.data.userId,
+      userName: user.data.userName,
+      recoveryId: user.data.recoveryId,
+      authenticators: authenticators
+   };
+
+   return JSON.stringify(response);
+}
+
 // Not tracking events for this method since they are frequent and not particlyarly
 // interesting
 async function getAuthenticators(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
-
    const user = await getVerifiedUser(params.userid, params.usercred);
+   const resonse = await loadAuthenticators(user);
+   return JSON.stringify(resonse);
+}
+
+
+// TODO make better use of ElectodB types for return...
+async function loadAuthenticators(user: any): Promise<AuthenticatorInfo[]> {
 
    const auths = await Authenticators.query.byUserId({
       userId: user.data.userId
    }).go({ attributes: ['description', 'credentialId', 'aaguid', 'createdAt'] });
 
    if (!auths || auths.data.length == 0) {
-      return '[]';
+      return [];
    }
 
    // sort ascending (oldest to newest)
@@ -600,7 +666,7 @@ async function getAuthenticators(rpID: string, rpOrigin: string, params: QParams
       });
    }
 
-   const response: AuthenticatorInfo[] = auths.data.map((cred: AuthItem) => ({
+   const authenticators: AuthenticatorInfo[] = auths.data.map((cred: AuthItem) => ({
       credentialId: cred.credentialId,
       description: cred.description,
       lightIcon: aaguidsMap.get(cred.aaguid).lightIcon ?? lightFileDefault,
@@ -608,7 +674,7 @@ async function getAuthenticators(rpID: string, rpOrigin: string, params: QParams
       name: aaguidsMap.get(cred.aaguid).name ?? 'Passkey',
    }));
 
-   return JSON.stringify(response);
+   return authenticators;
 }
 
 async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
@@ -649,10 +715,11 @@ async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QPara
    // Let this happen async
    recordEvent(EventNames.RegDelete, user.data.userId, params.credid);
 
-   return JSON.stringify({
+   const response: DeleteInfo = {
       credentialId: params.credid,
-      userId: delUserId,
-   });
+      userId: delUserId
+   };
+   return JSON.stringify(response);
 }
 
 // recover removes all existing passkeys, then initiates the
@@ -935,7 +1002,51 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
 }
 
 async function patch(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+/*
+   const batchSize = 14;
 
+   const userAttrs = ["userId"];
+   let users = await Users.scan.go({
+      attributes: userAttrs,
+      limit: batchSize
+   });
+
+   let total = 0;
+
+   while (users && users.data && users.data.length > 0) {
+      total += users.data.length;
+
+      for (let user of users.data) {
+         // fake user to prevent Id use
+         if (user.userId == 'AAAAAAAAAAAAAAAAAAAAAA') {
+            continue;
+         }
+
+//         const mn = generateMnemonic(wordlist, 128);
+  //       const id = mnemonicToEntropy(mn, wordlist);
+    //     const recoveryId = base64UrlEncode(id);
+
+ //        await Users.patch({
+   //         userId: user.userId,
+     //    }).set({
+       //     recoveryId: ""
+       //  }).go();
+
+         console.log(`set ${user.userId} recoveryId to`)
+      }
+
+      if (!users.cursor) {
+         break;
+      }
+      users = await Users.scan.go({
+         attributes: userAttrs,
+         limit: batchSize,
+         cursor: users.cursor
+      });
+   }
+
+   console.log(`${total} users total`);
+*/
    return "done";
 }
 
@@ -944,6 +1055,7 @@ const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QPa
       regoptions: registrationOptions,
       authoptions: authenticationOptions,
       authenticators: getAuthenticators,
+      userinfo: getUserInfo
    },
    PUT: {
       description: putDescription,
@@ -952,6 +1064,7 @@ const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QPa
    POST: {
       verifyreg: verifyRegistration,
       verifyauth: verifyAuthentication,
+      replacerecovery: replaceRecovery,
       recover: recover,
       loadaaguids: loadAAGUIDs, // for internal use, don't add to cloudfront
       cleanse: cleanse, // for internal use, don't add to cloudfront

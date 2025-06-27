@@ -26,6 +26,10 @@ const Users = new Entity(
             type: "string",
             required: true
          },
+         recoveryId: {
+            type: "string",
+            required: true
+         },
          verified: {
             type: "boolean",
             default: () => false,
