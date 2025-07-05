@@ -26,17 +26,6 @@ type QParams = {
    [key: string]: string;
 }
 
-type RegistrationInfo = {
-   verified: boolean;
-   userCred?: string;
-   userId?: string;
-   userName?: string;
-   recoveryId?: string;
-   lightIcon?: string;
-   darkIcon?: string;
-   description?: string;
-};
-
 type AuthenticatorInfo = {
    credentialId: string;
    description: string;
@@ -54,10 +43,6 @@ type UserInfo = {
    authenticators?: AuthenticatorInfo[];
 };
 
-type DeleteInfo = {
-   credentialId: string;
-   userId?: string;
-};
 
 const UnknownUserId = 'unknown';
 
@@ -100,7 +85,11 @@ function base64Decode(base64: string | undefined): Buffer | undefined {
 }
 
 
-async function recordEvent(eventName: EventNames, userId: String, credentialId: String | undefined = undefined) {
+async function recordEvent(
+   eventName: EventNames,
+   userId: String,
+   credentialId: String | undefined = undefined
+) {
    try {
       const event = await AuthEvents.create({
          event: eventName,
@@ -117,7 +106,12 @@ async function recordEvent(eventName: EventNames, userId: String, credentialId: 
    }
 }
 
-async function verifyAuthentication(rpID: string, rpOrigin: string, params: QParams, bodyStr: string): Promise<string> {
+async function verifyAuthentication(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   bodyStr: string
+): Promise<string> {
    const body = JSON.parse(bodyStr);
 
    if (!body.response || !body.response.userHandle) {
@@ -197,7 +191,8 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
       response.recoveryId = user.data.recoveryId;
       response.authenticators = authenticators;
 
-      const patched = await Authenticators.patch({
+      // ok if this fails
+      await Authenticators.patch({
          userId: authenticator.data.userId,
          credentialId: authenticator.data.credentialId
       }).set({
@@ -211,7 +206,13 @@ async function verifyAuthentication(rpID: string, rpOrigin: string, params: QPar
    return JSON.stringify(response);
 }
 
-async function verifyRegistration(rpID: string, rpOrigin: string, params: QParams, bodyStr: string): Promise<string> {
+
+async function verifyRegistration(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   bodyStr: string
+): Promise<string> {
    const body = JSON.parse(bodyStr);
 
    if (!body.userId) {
@@ -257,7 +258,7 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       throw new ParamError('invalid registration');
    }
 
-   let response: RegistrationInfo = {
+   let response: UserInfo = {
       verified: verification.verified
    };
 
@@ -286,17 +287,17 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
       }).go();
 
       let description = 'Passkey';
-      let lightIcon = lightFileDefault;
-      let darkIcon = darkFileDefault;
+      // let lightIcon = lightFileDefault;
+      // let darkIcon = darkFileDefault;
 
-      if (aaguidDetails && aaguidDetails.data) {
-         description = aaguidDetails.data.name ?? 'Passkey';
-         description.slice(0, 42);
-         lightIcon = aaguidDetails.data.lightIcon ?? lightFileDefault;
-         darkIcon = aaguidDetails.data.darkIcon ?? darkFileDefault;
-      } else {
-         console.error('aaguid ' + aaguid + ' not found');
-      }
+      // if (aaguidDetails && aaguidDetails.data) {
+      //    description = aaguidDetails.data.name ?? 'Passkey';
+      //    description.slice(0, 42);
+      //    lightIcon = aaguidDetails.data.lightIcon ?? lightFileDefault;
+      //    darkIcon = aaguidDetails.data.darkIcon ?? darkFileDefault;
+      // } else {
+      //    console.error('aaguid ' + aaguid + ' not found');
+      // }
 
       // SimpleWebAuthen renamed these to WebAuthnCredential, now we have a missmatch
       const auth = await Authenticators.create({
@@ -340,13 +341,12 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
          console.error('validator creation failed');
       }
 
+      const authenticators = await loadAuthenticators(user);
       response.userCred = user.data.userCred;
-      response.description = description;
-      response.lightIcon = lightIcon;
-      response.darkIcon = darkIcon;
       response.userId = user.data.userId;
       response.userName = user.data.userName;
       response.recoveryId = user.data.recoveryId;
+      response.authenticators = authenticators;
    }
 
    // Let this happen async
@@ -355,7 +355,13 @@ async function verifyRegistration(rpID: string, rpOrigin: string, params: QParam
    return JSON.stringify(response);
 }
 
-async function authenticationOptions(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+
+async function authenticationOptions(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 
    // If no userid is provided, then we don't return allowed creds and
    // the user is forced to pick one on their own. That happens when the user is
@@ -409,7 +415,13 @@ async function authenticationOptions(rpID: string, rpOrigin: string, params: QPa
    }
 }
 
-async function registrationOptions(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+
+async function registrationOptions(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 
    // TODO: Improve use of ElectoDB types
    let user: any;
@@ -509,7 +521,39 @@ async function registrationOptions(rpID: string, rpOrigin: string, params: QPara
    }
 };
 
-async function putDescription(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+
+async function makeResponseUserInfo(
+   user: UserItem,
+   overRides?: Record<string,any>,
+   auths?: AuthenticatorInfo[]
+) : Promise<UserInfo> {
+   // simple error check, don't expt userId to be an override
+   if(overRides && 'userId' in overRides) {
+      throw new Error('invalid override values');
+   }
+
+   auths = auths ?? await loadAuthenticators(user);
+
+   // user explicit assignment rather than spread operator to prevent leading information
+   // if/when the Users entity table has internal only info added to it.
+   let userInfo: UserInfo = {
+      verified: user.data.verfified,
+      userCred: user.data.userCred,
+      userId: user.data.userId,
+      userName: user.data.userName,
+      recoveryId: user.data.recoveryId,
+      authenticators: auths
+   };
+   return Object.assign(userInfo, overRides);
+}
+
+
+async function putDescription(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 
    const user = await getVerifiedUser(params.userid, params.usercred);
 
@@ -537,13 +581,18 @@ async function putDescription(rpID: string, rpOrigin: string, params: QParams, b
    // Let this happen async
    recordEvent(EventNames.PutDescription, user.data.userId, params.credid);
 
-   return JSON.stringify({
-      credentialId: patched.data.credentialId,
-      description: body
-   });
+   // return with full UserInfo to make client side refresh simpler
+   const response = await makeResponseUserInfo(user, {description: body});
+   return JSON.stringify(response);
 }
 
-async function putUserName(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+
+async function putUserName(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 
    const user = await getVerifiedUser(params.userid, params.usercred);
 
@@ -567,13 +616,18 @@ async function putUserName(rpID: string, rpOrigin: string, params: QParams, body
    // Let this happen async
    recordEvent(EventNames.PutUserName, user.data.userId, user.data.userCred);
 
-   return JSON.stringify({
-      userId: patched.data.userId,
-      userName: body
-   });
+   // return with full UserInfo to make client side refresh simpler
+   const response = await makeResponseUserInfo(user, {userName: body});
+   return JSON.stringify(response);
 }
 
-async function replaceRecovery(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+
+async function replaceRecovery(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 
    const user = await getVerifiedUser(params.userid, params.usercred);
 
@@ -594,34 +648,33 @@ async function replaceRecovery(rpID: string, rpOrigin: string, params: QParams, 
    // Let this happen async
    recordEvent(EventNames.ReplaceRecovery, user.data.userId, user.data.userCred)
 
-   return JSON.stringify({
-      userId: patched.data.userId,
-      recoveryId: recoveryId
-   });
+   // return with full UserInfo to make client-side refresh simpler
+   const response = await makeResponseUserInfo(user, {recoveryId: recoveryId});
+   return JSON.stringify(response);
 }
+
 
 // Not tracking events for this method since they are frequent and not particlyarly
 // interesting
-async function getUserInfo(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
-
+async function getUserInfo(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
    const user = await getVerifiedUser(params.userid, params.usercred);
-   const authenticators = await loadAuthenticators(user);
-
-   const response: UserInfo = {
-      verified: user.data.verfified,
-      userCred: user.data.userCred,
-      userId: user.data.userId,
-      userName: user.data.userName,
-      recoveryId: user.data.recoveryId,
-      authenticators: authenticators
-   };
-
+   const response = await makeResponseUserInfo(user);
    return JSON.stringify(response);
 }
 
 // Not tracking events for this method since they are frequent and not particlyarly
 // interesting
-async function getAuthenticators(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+async function getAuthenticators(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
    const user = await getVerifiedUser(params.userid, params.usercred);
    const resonse = await loadAuthenticators(user);
    return JSON.stringify(resonse);
@@ -644,19 +697,18 @@ async function loadAuthenticators(user: any): Promise<AuthenticatorInfo[]> {
       return left.createdAt - right.createdAt;
    });
 
-   const aaguidsMap = new Map();
-   for (let auth of auths.data) {
-      aaguidsMap.set(auth.aaguid, '');
-   }
+   // const aaguidsMap = new Map();
+   // for (let auth of auths.data) {
+   //    aaguidsMap.set(auth.aaguid, '');
+   // }
 
-   const aaguidsGet = new Array();
-   for (let aaguid of aaguidsMap.keys()) {
-      aaguidsGet.push({
-         aaguid: aaguid
-      });
-   }
+   // const aaguidsGet = [...aaguidsMap.keys()];
 
+   const aaguidsGet = auths.data.map((cred: AuthItem) => cred.aaguid);
+
+   // ElectroDB conversts array get to batch get under the covers
    const aaguidsDetail = await AAGUIDs.get(aaguidsGet).go();
+   const aaguidsMap = new Map();
 
    for (let aaguidDetail of aaguidsDetail.data) {
       aaguidsMap.set(aaguidDetail.aaguid, {
@@ -677,7 +729,13 @@ async function loadAuthenticators(user: any): Promise<AuthenticatorInfo[]> {
    return authenticators;
 }
 
-async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+
+async function deleteAuthenticator(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 
    const user = await getVerifiedUser(params.userid, params.usercred);
    if (!params.credid) {
@@ -693,15 +751,11 @@ async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QPara
       throw new ParamError('authenticator not found');
    }
 
-   // If there are not authenticators remaining, delete
+   const response = await loadAuthenticators(user.data.userId);
+
+   // If there are no authenticators remaining, delete
    // the entire user identity.
-   const auths = await Authenticators.query.byUserId({
-      userId: user.data.userId
-   }).go({ attributes: ['credentialId'] });
-
-   let delUserId: string | undefined;
-
-   if (auths && auths.data.length == 0) {
+   if (response.length == 0) {
       const deleted = await Users.delete({
          userId: user.data.userId
       }).go();
@@ -709,23 +763,23 @@ async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QPara
       if (!deleted || !deleted.data) {
          throw new ParamError('user not found');
       }
-      delUserId = user.data.userId;
    }
 
    // Let this happen async
    recordEvent(EventNames.RegDelete, user.data.userId, params.credid);
 
-   const response: DeleteInfo = {
-      credentialId: params.credid,
-      userId: delUserId
-   };
    return JSON.stringify(response);
 }
 
 // recover removes all existing passkeys, then initiates the
 // process or creating a new passkey. Caller is expected to followup
 // with a call to verifyRegistration
-async function recover(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+async function recover(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 
    // Ensure recovery link is valid
    const hash = createHash(HASHALG);
@@ -771,6 +825,10 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
    // up after, but then recovery may be less certain in a security incident.
    if (auths && auths.data.length != 0) {
       const deleted = await Authenticators.delete(auths.data).go();
+      // log but continue...
+      if (!deleted || !deleted.data) {
+         console.error('authenticator delete failed');
+      }
    }
 
    const rcount = user.data.recovered ? user.data.recovered + 1 : 1;
@@ -799,7 +857,7 @@ async function recover(rpID: string, rpOrigin: string, params: QParams, body: st
 }
 
 // TODO make better use of ElectodB types for return...
-async function getVerifiedUser(userId: string, userCred: string): Promise<any> {
+async function getVerifiedUser(userId: string, userCred: string): Promise<UserItem> {
 
    if (!userCred) {
       throw new ParamError('missing userCred');
@@ -825,7 +883,7 @@ async function getVerifiedUser(userId: string, userCred: string): Promise<any> {
 //
 // TODO make better use of ElectodB types for return...
 //
-async function getUnVerifiedUser(userId: string): Promise<any> {
+async function getUnVerifiedUser(userId: string): Promise<UserItem> {
 
    if (!userId) {
       throw new ParamError('missing userid');
@@ -843,7 +901,12 @@ async function getUnVerifiedUser(userId: string): Promise<any> {
    return user;
 }
 
-async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+async function loadAAGUIDs(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 
    try {
       const filePath = resolve('./combined.json');
@@ -880,7 +943,12 @@ async function loadAAGUIDs(rpID: string, rpOrigin: string, params: QParams, body
 }
 
 
-async function cleanse(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+async function cleanse(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 
    const days = 15;
    const olderThan = Date.now() - (days * 24 * 60 * 60 * 1000);
@@ -909,7 +977,12 @@ async function cleanse(rpID: string, rpOrigin: string, params: QParams, body: st
    return 'done';
 }
 
-async function consistency(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+async function consistency(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 
    const batchSize = 14;
 
@@ -1001,7 +1074,12 @@ async function consistency(rpID: string, rpOrigin: string, params: QParams, body
    return "done";
 }
 
-async function patch(rpID: string, rpOrigin: string, params: QParams, body: string): Promise<string> {
+async function patch(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
 /*
    const batchSize = 14;
 
@@ -1050,7 +1128,9 @@ async function patch(rpID: string, rpOrigin: string, params: QParams, body: stri
    return "done";
 }
 
-const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QParams, b: string) => Promise<string> } } = {
+const FUNCTIONS: {
+   [key: string]: { [key: string]: (r: string, o: string, p: QParams, b: string) => Promise<string> }
+} = {
    GET: {
       regoptions: registrationOptions,
       authoptions: authenticationOptions,
@@ -1077,7 +1157,6 @@ const FUNCTIONS: { [key: string]: { [key: string]: (r: string, o: string, p: QPa
 }
 
 function response(body: string, status: number): { [key: string]: string | number } {
-
    const resp = {
       statusCode: status,
       body: body
