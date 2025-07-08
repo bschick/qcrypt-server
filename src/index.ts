@@ -39,7 +39,7 @@ type UserInfo = {
    userCred?: string;
    userId?: string;
    userName?: string;
-   recoveryId?: string;
+   hasRecoveryId?: boolean;
    authenticators?: AuthenticatorInfo[];
 };
 
@@ -52,10 +52,11 @@ enum EventNames {
    RegOptions = 'RegOptions',
    RegVerfiy = 'RegVerfiy',
    RegDelete = 'RegDelete',
+   UserDelete = 'UserDelete',
    PutDescription = 'PutDescription',
    PutUserName = 'PutUserName',
-   ReplaceRecovery = 'ReplaceRecovery',
    Recover = 'Recover',
+   GetRecovery = 'GetRecovery',
 }
 
 const lightFileDefault = 'assets/aaguid/img/default_light.svg'
@@ -97,6 +98,7 @@ async function recordEvent(
          credentialId: credentialId
       }).go();
 
+      // record, but don't fail
       if (!event || !event.data) {
          console.error('event not created');
       }
@@ -124,7 +126,7 @@ async function verifyAuthentication(
       throw new ParamError('missing challenge reply');
    }
 
-   const user = await getUnVerifiedUser(body.response.userHandle!);
+   const unverifiedUser = await getUnVerifiedUser(body.response.userHandle!);
 
    // Make sure this is a challenge the server really issued and that it is
    // not outdated. Once validated, it's removed to prevent reuse. Note that
@@ -150,7 +152,7 @@ async function verifyAuthentication(
 
    // SimpleWebAuthn renamed these to WebAuthnCredential, so now we have a name missmatch
    const authenticator = await Authenticators.get({
-      userId: user.data.userId,
+      userId: unverifiedUser.data.userId,
       credentialId: body.id
    }).go();
 
@@ -184,12 +186,8 @@ async function verifyAuthentication(
    };
 
    if (verification.verified) {
-      const authenticators = await loadAuthenticators(user);
-      response.userCred = user.data.userCred;
-      response.userId = user.data.userId;
-      response.userName = user.data.userName;
-      response.recoveryId = user.data.recoveryId;
-      response.authenticators = authenticators;
+      // now verified
+      const user = unverifiedUser;
 
       // ok if this fails
       await Authenticators.patch({
@@ -198,10 +196,12 @@ async function verifyAuthentication(
       }).set({
          lastLogin: Date.now()
       }).go();
+
+      response = await makeUserInfoResponse(user);
    }
 
    // Let this happen async
-   recordEvent(EventNames.AuthVerify, user.data.userId, authenticator.data.credentialId);
+   recordEvent(EventNames.AuthVerify, unverifiedUser.data.userId, authenticator.data.credentialId);
 
    return JSON.stringify(response);
 }
@@ -222,7 +222,7 @@ async function verifyRegistration(
       throw new ParamError('missing challenge reply');
    }
 
-   const user = await getUnVerifiedUser(body.userId);
+   const unverifiedUser = await getUnVerifiedUser(body.userId);
 
    // Make sure this is a challenge the server really issued and that it is
    // not outdated. Once validated, remove to prevent reuse
@@ -262,7 +262,7 @@ async function verifyRegistration(
       verified: verification.verified
    };
 
-   let eventCredId;
+   let eventCredId: string | undefined;
 
    if (verification.verified) {
       const {
@@ -287,21 +287,17 @@ async function verifyRegistration(
       }).go();
 
       let description = 'Passkey';
-      // let lightIcon = lightFileDefault;
-      // let darkIcon = darkFileDefault;
 
-      // if (aaguidDetails && aaguidDetails.data) {
-      //    description = aaguidDetails.data.name ?? 'Passkey';
-      //    description.slice(0, 42);
-      //    lightIcon = aaguidDetails.data.lightIcon ?? lightFileDefault;
-      //    darkIcon = aaguidDetails.data.darkIcon ?? darkFileDefault;
-      // } else {
-      //    console.error('aaguid ' + aaguid + ' not found');
-      // }
+      if (aaguidDetails && aaguidDetails.data) {
+         description = aaguidDetails.data.name ?? 'Passkey';
+         description.slice(0, 42);
+      } else {
+         console.error('aaguid ' + aaguid + ' not found');
+      }
 
       // SimpleWebAuthen renamed these to WebAuthnCredential, now we have a missmatch
       const auth = await Authenticators.create({
-         userId: user.data.userId,
+         userId: unverifiedUser.data.userId,
          description: description,
          credentialId: id,
          credentialPublicKey: base64UrlEncode(publicKey),
@@ -319,10 +315,18 @@ async function verifyRegistration(
       }
 
       await Users.patch({
-         userId: user.data.userId,
+         userId: unverifiedUser.data.userId,
       }).set({
          verified: true
       }).go();
+
+      // now verified
+      const user: UserItem = {
+         data:{
+            ...unverifiedUser.data,
+            verified: true
+         }
+      };
 
       const hash = createHash(HASHALG);
       hash.update(user.data.userId);
@@ -341,16 +345,13 @@ async function verifyRegistration(
          console.error('validator creation failed');
       }
 
-      const authenticators = await loadAuthenticators(user);
-      response.userCred = user.data.userCred;
-      response.userId = user.data.userId;
-      response.userName = user.data.userName;
-      response.recoveryId = user.data.recoveryId;
-      response.authenticators = authenticators;
+      // force consistent read to capture create
+      const authenticators = await loadAuthenticators(user, true);
+      response = await makeUserInfoResponse(user, undefined, authenticators);
    }
 
    // Let this happen async
-   recordEvent(EventNames.RegVerfiy, user.data.userId, eventCredId);
+   recordEvent(EventNames.RegVerfiy, unverifiedUser.data.userId, eventCredId);
 
    return JSON.stringify(response);
 }
@@ -372,12 +373,12 @@ async function authenticationOptions(
    if (params.userid) {
       // Callers could use this to guess userids, but userid is 128bits psuedo-random,
       // so it would take an eternity (and size-large aws bills for me)
-      const user = await getUnVerifiedUser(params.userid);
+      const unverifiedUser = await getUnVerifiedUser(params.userid);
 
-      userId = user.data.userId;
+      userId = unverifiedUser.data.userId;
 
       const auths = await Authenticators.query.byUserId({
-         userId: user.data.userId
+         userId: unverifiedUser.data.userId
       }).go();
 
       // a user id without authenticator creds was never verified, so reject
@@ -522,7 +523,7 @@ async function registrationOptions(
 };
 
 
-async function makeResponseUserInfo(
+async function makeUserInfoResponse(
    user: UserItem,
    overRides?: Record<string,any>,
    auths?: AuthenticatorInfo[]
@@ -535,15 +536,16 @@ async function makeResponseUserInfo(
    auths = auths ?? await loadAuthenticators(user);
 
    // user explicit assignment rather than spread operator to prevent leading information
-   // if/when the Users entity table has internal only info added to it.
+   // in UserItem table that is internal only or provided separatly (like recoveryId)
    let userInfo: UserInfo = {
-      verified: user.data.verfified,
+      verified: user.data.verified,
       userCred: user.data.userCred,
       userId: user.data.userId,
       userName: user.data.userName,
-      recoveryId: user.data.recoveryId,
+      hasRecoveryId: user.data.recoveryId && user.data.recoveryId.length > 0,
       authenticators: auths
    };
+
    return Object.assign(userInfo, overRides);
 }
 
@@ -578,11 +580,14 @@ async function putDescription(
       throw new ParamError('description update failed');
    }
 
+   // force consistent read to capture patch
+   const auths = await loadAuthenticators(user, true);
+
    // Let this happen async
    recordEvent(EventNames.PutDescription, user.data.userId, params.credid);
 
    // return with full UserInfo to make client side refresh simpler
-   const response = await makeResponseUserInfo(user, {description: body});
+   const response = await makeUserInfoResponse(user, undefined, auths);
    return JSON.stringify(response);
 }
 
@@ -617,39 +622,7 @@ async function putUserName(
    recordEvent(EventNames.PutUserName, user.data.userId, user.data.userCred);
 
    // return with full UserInfo to make client side refresh simpler
-   const response = await makeResponseUserInfo(user, {userName: body});
-   return JSON.stringify(response);
-}
-
-
-async function replaceRecovery(
-   rpID: string,
-   rpOrigin: string,
-   params: QParams,
-   body: string
-): Promise<string> {
-
-   const user = await getVerifiedUser(params.userid, params.usercred);
-
-   const mn = generateMnemonic(wordlist, 128);
-   const id = mnemonicToEntropy(mn, wordlist);
-   const recoveryId = base64UrlEncode(id);
-
-   const patched = await Users.patch({
-      userId: user.data.userId,
-   }).set({
-      recoveryId: recoveryId
-   }).go();
-
-   if (!patched || !patched.data) {
-      throw new ParamError('recovery update failed');
-   }
-
-   // Let this happen async
-   recordEvent(EventNames.ReplaceRecovery, user.data.userId, user.data.userCred)
-
-   // return with full UserInfo to make client-side refresh simpler
-   const response = await makeResponseUserInfo(user, {recoveryId: recoveryId});
+   const response = await makeUserInfoResponse(user, {userName: body});
    return JSON.stringify(response);
 }
 
@@ -663,7 +636,7 @@ async function getUserInfo(
    body: string
 ): Promise<string> {
    const user = await getVerifiedUser(params.userid, params.usercred);
-   const response = await makeResponseUserInfo(user);
+   const response = await makeUserInfoResponse(user);
    return JSON.stringify(response);
 }
 
@@ -682,11 +655,17 @@ async function getAuthenticators(
 
 
 // TODO make better use of ElectodB types for return...
-async function loadAuthenticators(user: any): Promise<AuthenticatorInfo[]> {
+async function loadAuthenticators(
+   user: UserItem,
+   consistent: boolean = false
+): Promise<AuthenticatorInfo[]> {
 
    const auths = await Authenticators.query.byUserId({
       userId: user.data.userId
-   }).go({ attributes: ['description', 'credentialId', 'aaguid', 'createdAt'] });
+   }).go({
+      attributes: ['description', 'credentialId', 'aaguid', 'createdAt'],
+      consistent: consistent
+   });
 
    if (!auths || auths.data.length == 0) {
       return [];
@@ -704,7 +683,10 @@ async function loadAuthenticators(user: any): Promise<AuthenticatorInfo[]> {
 
    // const aaguidsGet = [...aaguidsMap.keys()];
 
-   const aaguidsGet = auths.data.map((cred: AuthItem) => cred.aaguid);
+   const aaguids = new Set<string>(auths.data.map((cred: AuthItem) => cred.aaguid));
+   const aaguidsGet = Array.from(aaguids).map((aaguid: string) => ({
+      aaguid: aaguid
+   }));
 
    // ElectroDB conversts array get to batch get under the covers
    const aaguidsDetail = await AAGUIDs.get(aaguidsGet).go();
@@ -751,11 +733,16 @@ async function deleteAuthenticator(
       throw new ParamError('authenticator not found');
    }
 
-   const response = await loadAuthenticators(user.data.userId);
+   // force consistent read to capture delete
+   const auths = await loadAuthenticators(user, true);
 
-   // If there are no authenticators remaining, delete
-   // the entire user identity.
-   if (response.length == 0) {
+   let response: UserInfo = {
+      verified: false
+   };
+
+   // If there are no authenticators remaining, delete the
+   // entire user identity and return unverified UserInfo object
+   if (auths.length == 0) {
       const deleted = await Users.delete({
          userId: user.data.userId
       }).go();
@@ -763,13 +750,51 @@ async function deleteAuthenticator(
       if (!deleted || !deleted.data) {
          throw new ParamError('user not found');
       }
+      // Let this happen async
+      recordEvent(EventNames.UserDelete, user.data.userId, params.credid);
+   } else {
+      response = await makeUserInfoResponse(user, undefined, auths);
+      recordEvent(EventNames.RegDelete, user.data.userId, params.credid);
    }
-
-   // Let this happen async
-   recordEvent(EventNames.RegDelete, user.data.userId, params.credid);
 
    return JSON.stringify(response);
 }
+
+async function getRecovery(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
+
+   const user = await getVerifiedUser(params.userid, params.usercred);
+
+   if(!user.data.recoveryId || user.data.recoveryId.length == 0){
+      const mn = generateMnemonic(wordlist, 128);
+      const id = mnemonicToEntropy(mn, wordlist);
+      const recoveryId = base64UrlEncode(id);
+
+      const patched = await Users.patch({
+         userId: user.data.userId,
+      }).set({
+         recoveryId: recoveryId
+      }).go();
+
+      if (!patched || !patched.data) {
+         throw new ParamError('recovery update failed');
+      }
+
+      user.data['recoveryId'] = recoveryId;
+   }
+
+   // Let this happen async
+   recordEvent(EventNames.GetRecovery, user.data.userId, user.data.userCred);
+
+   return JSON.stringify({
+      recoveryId: user.data.recoveryId
+   });
+}
+
 
 // recover removes all existing passkeys, then initiates the
 // process or creating a new passkey. Caller is expected to followup
@@ -860,16 +885,18 @@ async function recover(
 async function getVerifiedUser(userId: string, userCred: string): Promise<UserItem> {
 
    if (!userCred) {
-      throw new ParamError('missing userCred');
+      throw new ParamError('missing usercred');
    }
 
-   const user = await getUnVerifiedUser(userId);
+   const testUser = await getUnVerifiedUser(userId);
 
-   if (user.data.userCred != userCred) {
+   if (testUser.data.userCred != userCred || !testUser.data.verified) {
       // vague error to make guessing harder
-      throw new ParamError('user or userCred not found')
+      throw new ParamError('user not found')
    }
 
+   // now verified
+   const user = testUser;
    return user;
 }
 
@@ -889,16 +916,16 @@ async function getUnVerifiedUser(userId: string): Promise<UserItem> {
       throw new ParamError('missing userid');
    }
 
-   const user = await Users.get({
+   const unverifiedUser = await Users.get({
       userId: userId
    }).go();
 
-   if (!user || !user.data) {
+   if (!unverifiedUser || !unverifiedUser.data) {
       // vague error to make guessing harder
-      throw new ParamError('user or userCred not found')
+      throw new ParamError('user not found')
    }
 
-   return user;
+   return unverifiedUser;
 }
 
 async function loadAAGUIDs(
@@ -1135,6 +1162,7 @@ const FUNCTIONS: {
       regoptions: registrationOptions,
       authoptions: authenticationOptions,
       authenticators: getAuthenticators,
+      recovery: getRecovery,
       userinfo: getUserInfo
    },
    PUT: {
@@ -1144,8 +1172,7 @@ const FUNCTIONS: {
    POST: {
       verifyreg: verifyRegistration,
       verifyauth: verifyAuthentication,
-      replacerecovery: replaceRecovery,
-      recover: recover,
+      recovery: recover,
       loadaaguids: loadAAGUIDs, // for internal use, don't add to cloudfront
       cleanse: cleanse, // for internal use, don't add to cloudfront
       consistency: consistency,  // for internal use, don't add to cloudfront
