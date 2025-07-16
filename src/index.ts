@@ -126,7 +126,7 @@ async function verifyAuthentication(
       throw new ParamError('missing challenge reply');
    }
 
-   const unverifiedUser = await getUnVerifiedUser(body.response.userHandle!);
+   const unverifiedUser = await getUnverifiedUser(body.response.userHandle!);
 
    // Make sure this is a challenge the server really issued and that it is
    // not outdated. Once validated, it's removed to prevent reuse. Note that
@@ -222,7 +222,7 @@ async function verifyRegistration(
       throw new ParamError('missing challenge reply');
    }
 
-   const unverifiedUser = await getUnVerifiedUser(body.userId);
+   const unverifiedUser = await getUnverifiedUser(body.userId);
 
    // Make sure this is a challenge the server really issued and that it is
    // not outdated. Once validated, remove to prevent reuse
@@ -373,7 +373,7 @@ async function authenticationOptions(
    if (params.userid) {
       // Callers could use this to guess userids, but userid is 128bits psuedo-random,
       // so it would take an eternity (and size-large aws bills for me)
-      const unverifiedUser = await getUnVerifiedUser(params.userid);
+      const unverifiedUser = await getUnverifiedUser(params.userid);
 
       userId = unverifiedUser.data.userId;
 
@@ -799,7 +799,7 @@ async function getRecovery(
 // recover removes all existing passkeys, then initiates the
 // process or creating a new passkey. Caller is expected to followup
 // with a call to verifyRegistration
-async function recover(
+async function recovery(
    rpID: string,
    rpOrigin: string,
    params: QParams,
@@ -821,6 +821,10 @@ async function recover(
 
    // Currently, require an existing user for recovery
    const user = await getVerifiedUser(params.userid, params.usercred);
+
+   if (user.data.recoveryId && user.data.recoveryId.length > 1) {
+      throw new ParamError('must use recovery words instead');
+   }
 
    /* Use the follow To support automatic user re-creation
     *
@@ -881,6 +885,74 @@ async function recover(
    );
 }
 
+// recover removes all existing passkeys, then initiates the
+// process or creating a new passkey. Caller is expected to followup
+// with a call to verifyRegistration
+async function recovery2(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<string> {
+
+   const unverifiedUser = await getUnverifiedUser(params.userid);
+
+   if (!params.recoveryId || params.recoveryId.length < 10) {
+      throw new ParamError('missing recovery id');
+   }
+   if (!unverifiedUser.data.recoveryId ||
+        unverifiedUser.data.recoveryId.length < 10 ||
+       !unverifiedUser.data.verified) {
+      throw new ParamError('invalid recovery id'); // vague on purpose
+   }
+   if (unverifiedUser.data.recoveryId !== params.recoveryId) {
+      throw new ParamError('invalid recovery id'); // vague on purpose
+   }
+
+   // now verified
+   const user = unverifiedUser;
+
+   const auths = await Authenticators.query.byUserId({
+      userId: user.data.userId
+   }).go({ attributes: ['userId', 'credentialId'] });
+
+   // Note that if the creation of a new passkey is aborted or cancels, the account
+   // will be left with no passkeys. Recovery can be run again to create a new passkey.
+   // Could alternatively address this by marking passkey for deletion and cleaning
+   // up after, but then recovery may be less certain in a security incident.
+   if (auths && auths.data.length != 0) {
+      const deleted = await Authenticators.delete(auths.data).go();
+      // log but continue...
+      if (!deleted || !deleted.data) {
+         console.error('authenticator delete failed');
+      }
+   }
+
+   const rcount = user.data.recovered ? user.data.recovered + 1 : 1;
+
+   const patched = await Users.patch({
+      userId: user.data.userId
+   }).set({
+      recovered: rcount,
+   }).go();
+
+   // log but continue...
+   if (!patched || !patched.data) {
+      console.error('recovered count update failed');
+   }
+
+   // Let this happen async
+   recordEvent(EventNames.Recover, user.data.userId);
+
+   // caller should followup with call to verifyRegistration
+   return registrationOptions(
+      rpID,
+      rpOrigin,
+      { userid: user.data.userId, usercred: user.data.userCred },
+      ''
+   );
+}
+
 // TODO make better use of ElectodB types for return...
 async function getVerifiedUser(userId: string, userCred: string): Promise<UserItem> {
 
@@ -888,9 +960,9 @@ async function getVerifiedUser(userId: string, userCred: string): Promise<UserIt
       throw new ParamError('missing usercred');
    }
 
-   const testUser = await getUnVerifiedUser(userId);
+   const testUser = await getUnverifiedUser(userId);
 
-   if (testUser.data.userCred != userCred || !testUser.data.verified) {
+   if (testUser.data.userCred !== userCred || !testUser.data.verified) {
       // vague error to make guessing harder
       throw new ParamError('user not found')
    }
@@ -910,7 +982,7 @@ async function getVerifiedUser(userId: string, userCred: string): Promise<UserIt
 //
 // TODO make better use of ElectodB types for return...
 //
-async function getUnVerifiedUser(userId: string): Promise<UserItem> {
+async function getUnverifiedUser(userId: string): Promise<UserItem> {
 
    if (!userId) {
       throw new ParamError('missing userid');
@@ -1172,7 +1244,8 @@ const FUNCTIONS: {
    POST: {
       verifyreg: verifyRegistration,
       verifyauth: verifyAuthentication,
-      recovery: recover,
+      recovery: recovery,
+      recovery2: recovery2,
       loadaaguids: loadAAGUIDs, // for internal use, don't add to cloudfront
       cleanse: cleanse, // for internal use, don't add to cloudfront
       consistency: consistency,  // for internal use, don't add to cloudfront
