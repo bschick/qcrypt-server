@@ -1,30 +1,54 @@
-const {
+import {
    generateAuthenticationOptions,
    verifyAuthenticationResponse,
    generateRegistrationOptions,
    verifyRegistrationResponse,
-} = require('@simplewebauthn/server');
-const {
+} from '@simplewebauthn/server';
+
+import type {
+   VerifiedRegistrationResponse,
+   VerifiedAuthenticationResponse,
+   PublicKeyCredentialRequestOptionsJSON,
+   PublicKeyCredentialCreationOptionsJSON,
+   WebAuthnCredential,
+   AuthenticatorTransportFuture,
+   PublicKeyCredentialDescriptorJSON
+} from '@simplewebauthn/server';
+import {
    Users,
    Authenticators,
    Challenges,
    AuthEvents,
    Validators,
-   AAGUIDs } = require("./models.ts");
-const { Buffer } = require("node:buffer");
-const { createHash, randomBytes } = require('node:crypto');
-const { readFile } = require('node:fs/promises');
-const { resolve } = require('node:path');
-const { setTimeout } = require('node:timers/promises');
-const { generateMnemonic, mnemonicToEntropy } = require('@scure/bip39');
-const { wordlist } = require('@scure/bip39/wordlists/english');
+   AAGUIDs
+} from "./models";
+
 import { type EntityItem } from 'electrodb';
 type UserItem = EntityItem<typeof Users>;
-type AuthItem = EntityItem<typeof Authenticators>;
+type AuthItem = EntityItem<typeof Authenticators>; ;
+
+import {
+   KMSClient,
+   EncryptCommand,
+   DecryptCommand,
+   GenerateRandomCommand
+} from "@aws-sdk/client-kms";
+
+import { Buffer } from "node:buffer";
+import { createHash, hkdfSync } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { setTimeout } from 'node:timers/promises';
+import { sign, verify, type JwtPayload } from 'jsonwebtoken';
 
 type QParams = {
    [key: string]: string;
 }
+
+type Response = {
+   body: string;
+   startSession?: UserItem;
+};
 
 type AuthenticatorInfo = {
    credentialId: string;
@@ -36,13 +60,17 @@ type AuthenticatorInfo = {
 
 type UserInfo = {
    verified: boolean;
-   userCred?: string;
    userId?: string;
    userName?: string;
    hasRecoveryId?: boolean;
    authenticators?: AuthenticatorInfo[];
 };
 
+type LoginUserInfo = UserInfo & {
+   pkId?: string;
+   userCred?: string;
+   recoveryId?: string;
+}
 
 const UnknownUserId = 'unknown';
 
@@ -69,16 +97,26 @@ const HASHALG = 'blake2s256';
 
 const USERID_BYTES = 16;
 const USERCRED_BYTES = 32;
+const JWTMATERIAL_BYTES = 32;
+const RECOVERYID_BYTES = 16;
+
+const KMS_KEYID = process.env.KMSKeyId;
+const kmsClient = new KMSClient({ region: "us-east-1" });
+let jwtMaterial: Uint8Array | undefined;
+
 
 class ParamError extends Error {
 }
 
+class AuthError extends Error {
+}
+
 function base64UrlEncode(bytes: Uint8Array | undefined): string | undefined {
-   return bytes ? Buffer.from(bytes).toString('base64Url') : undefined;
+   return bytes ? Buffer.from(bytes).toString('base64url') : undefined;
 }
 
 function base64UrlDecode(base64: string | undefined): Buffer | undefined {
-   return base64 ? Buffer.from(base64, 'base64Url') : undefined;
+   return base64 ? Buffer.from(base64, 'base64url') : undefined;
 }
 
 function base64Decode(base64: string | undefined): Buffer | undefined {
@@ -86,10 +124,78 @@ function base64Decode(base64: string | undefined): Buffer | undefined {
 }
 
 
+async function encryptField(
+   field: Uint8Array,
+   context: {[key: string]: string}
+) : Promise<string> {
+   if(!KMS_KEYID) {
+      throw new Error('missing kms keyid')
+   }
+
+   const enc = new EncryptCommand({
+      Plaintext: field,
+      KeyId: KMS_KEYID,
+      EncryptionContext: context
+   });
+
+   const result = await kmsClient.send(enc);
+   if (!result.CiphertextBlob) {
+      throw new Error('field encryption failed, context:', context);
+   }
+
+   return base64UrlEncode(result.CiphertextBlob)!;
+}
+
+
+async function decryptField(
+   fieldEnc: string,
+   context: {[key: string]: string},
+   exptectedBytes: number
+) : Promise<string> {
+   if(!KMS_KEYID) {
+      throw new Error('missing kms keyid')
+   }
+
+   const fieldEncBytes =  base64UrlDecode(fieldEnc);
+   const dec = new DecryptCommand({
+      CiphertextBlob: fieldEncBytes,
+      KeyId: KMS_KEYID,
+      EncryptionContext: context
+   });
+
+   const result = await kmsClient.send(dec);
+   if(!result.Plaintext || result.Plaintext.byteLength != exptectedBytes) {
+      throw new Error('field decryption failed, context:', context);
+   }
+
+   return base64UrlEncode(result.Plaintext)!;
+}
+
+
+async function setupJwtMaterial(): Promise<Uint8Array> {
+   if (!process.env.EncMaterial) {
+      throw new Error('missing environment value');
+   }
+
+   try {
+      const encodedMaterial = await decryptField(
+         process.env.EncMaterial,
+         { purpose: "jwt" },
+         JWTMATERIAL_BYTES
+      );
+
+      return base64UrlDecode(encodedMaterial)!;
+   } catch(error) {
+      console.error("auth setup errror", error);
+      throw new Error('auth setup error');
+   }
+}
+
+
 async function recordEvent(
    eventName: EventNames,
-   userId: String,
-   credentialId: String | undefined = undefined
+   userId: string,
+   credentialId: string | undefined = undefined
 ) {
    try {
       const event = await AuthEvents.create({
@@ -108,12 +214,30 @@ async function recordEvent(
    }
 }
 
+async function verifySession(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   bodyStr: string,
+   verifiedUser?: UserItem
+): Promise<Response> {
+
+   if (!verifiedUser) {
+      throw new ParamError('user not found')
+   }
+
+   // do not start new session because auth was not provided
+   const responseBody = await makeLoginUserInfoResponse(verifiedUser);
+   return { body: JSON.stringify(responseBody)};
+}
+
+
 async function verifyAuthentication(
    rpID: string,
    rpOrigin: string,
    params: QParams,
    bodyStr: string
-): Promise<string> {
+): Promise<Response> {
    const body = JSON.parse(bodyStr);
 
    if (!body.response || !body.response.userHandle) {
@@ -145,29 +269,28 @@ async function verifyAuthentication(
       challenge: body.challenge
    }).go();
 
-   // Must use the last challenged within 1 minute or its rejected
-   if (Date.now() - challenge.data.createdAt > 60000) {
-      throw new ParamError('authentication timeout, try again');
+   if ( (Date.now() / 1000) > challenge.data.expiresAt) {
+      throw new AuthError('authentication timeout, try again');
    }
 
    // SimpleWebAuthn renamed these to WebAuthnCredential, so now we have a name missmatch
    const authenticator = await Authenticators.get({
-      userId: unverifiedUser.data.userId,
+      userId: unverifiedUser.userId,
       credentialId: body.id
    }).go();
 
    if (!authenticator || !authenticator.data) {
-      throw new ParamError('authenticator not found');
+      throw new AuthError('authenticator not found');
    }
 
-   const webAuthnCredential = {
-      publicKey: base64UrlDecode(authenticator.data.credentialPublicKey),
+   const webAuthnCredential: WebAuthnCredential = {
+      publicKey: base64UrlDecode(authenticator.data.credentialPublicKey)!,
       id: authenticator.data.credentialId,
-      count: 0, // not using counters
-      transports: authenticator.data.transports
+      counter: 0, // not using counters
+      transports: authenticator.data.transports as AuthenticatorTransportFuture[]
    };
 
-   let verification;
+   let verification: VerifiedAuthenticationResponse;
    try {
       verification = await verifyAuthenticationResponse({
          response: body,
@@ -178,16 +301,19 @@ async function verifyAuthentication(
       });
    } catch (error) {
       console.error(error);
-      throw new ParamError('invalid authorizatoin');
+      throw new AuthError('invalid authorizatoin');
    }
 
-   let response: UserInfo = {
+   // Should this be changed to throw and error if no verified?
+   let startSession: UserItem | undefined;
+   let responseBody: LoginUserInfo = {
       verified: verification.verified
    };
 
    if (verification.verified) {
       // now verified
-      const user = unverifiedUser;
+      const verifiedUser = unverifiedUser;
+      startSession = verifiedUser
 
       // ok if this fails
       await Authenticators.patch({
@@ -197,13 +323,54 @@ async function verifyAuthentication(
          lastLogin: Date.now()
       }).go();
 
-      response = await makeUserInfoResponse(user);
+      await Users.patch({
+         userId: verifiedUser.userId,
+      }).set({
+         lastCredentialId: authenticator.data.credentialId
+      }).go();
+
+      verifiedUser.lastCredentialId = authenticator.data.credentialId;
+
+      if (body.createRecovery &&
+          (!verifiedUser.recoveryIdEnc || verifiedUser.recoveryIdEnc.length == 0)) {
+         const rand = new GenerateRandomCommand({
+               NumberOfBytes: RECOVERYID_BYTES
+         });
+         const result = await kmsClient.send(rand);
+         const recoveryId = result.Plaintext;
+
+         if (!recoveryId || recoveryId.byteLength != RECOVERYID_BYTES) {
+            throw new Error("GenerateRandomCommand failure");
+         }
+
+         const recoveryIdEnc = await encryptField(
+            recoveryId,
+            { userId: verifiedUser.userId }
+         );
+
+         const patched = await Users.patch({
+            userId: verifiedUser.userId,
+         }).set({
+            recoveryIdEnc: recoveryIdEnc
+         }).go();
+
+         if (!patched || !patched.data) {
+            throw new ParamError('recovery update failed');
+         }
+
+         verifiedUser['recoveryIdEnc'] = recoveryIdEnc;
+      }
+
+      responseBody = await makeLoginUserInfoResponse(verifiedUser);
    }
 
    // Let this happen async
-   recordEvent(EventNames.AuthVerify, unverifiedUser.data.userId, authenticator.data.credentialId);
+   recordEvent(EventNames.AuthVerify, unverifiedUser.userId, authenticator.data.credentialId);
 
-   return JSON.stringify(response);
+   return {
+      body: JSON.stringify(responseBody),
+      startSession: startSession
+   };
 }
 
 
@@ -212,7 +379,7 @@ async function verifyRegistration(
    rpOrigin: string,
    params: QParams,
    bodyStr: string
-): Promise<string> {
+): Promise<Response> {
    const body = JSON.parse(bodyStr);
 
    if (!body.userId) {
@@ -240,11 +407,11 @@ async function verifyRegistration(
    }).go();
 
    // Must use the last challenged within 1 minute or its rejected
-   if (Date.now() - challenge.data.createdAt > 60000) {
-      throw new ParamError('verification timeout, try again');
+   if ( (Date.now() / 1000) > challenge.data.expiresAt) {
+      throw new AuthError('verification timeout, try again');
    }
 
-   let verification;
+   let verification: VerifiedRegistrationResponse;
    try {
       verification = await verifyRegistrationResponse({
          response: body,
@@ -255,14 +422,15 @@ async function verifyRegistration(
       });
    } catch (err) {
       console.error(err);
-      throw new ParamError('invalid registration');
+      throw new AuthError('invalid registration');
    }
 
-   let response: UserInfo = {
+   // Should this be changed to throw and error if no verified?
+   let startSession: UserItem | undefined;
+   let responseBody: LoginUserInfo = {
       verified: verification.verified
    };
 
-   let eventCredId: string | undefined;
 
    if (verification.verified) {
       const {
@@ -273,14 +441,12 @@ async function verifyRegistration(
          credentialDeviceType,
          credentialBackedUp,
          origin
-      } = verification.registrationInfo;
+      } = verification.registrationInfo!;
 
       const {
          id,
          publicKey,
       } = credential;
-
-      eventCredId = id;
 
       const aaguidDetails = await AAGUIDs.get({
          aaguid: aaguid
@@ -297,10 +463,10 @@ async function verifyRegistration(
 
       // SimpleWebAuthen renamed these to WebAuthnCredential, now we have a missmatch
       const auth = await Authenticators.create({
-         userId: unverifiedUser.data.userId,
+         userId: unverifiedUser.userId,
          description: description,
          credentialId: id,
-         credentialPublicKey: base64UrlEncode(publicKey),
+         credentialPublicKey: base64UrlEncode(publicKey)!,
          credentialDeviceType: credentialDeviceType,
          userVerified: userVerified,
          credentialBackedUp: credentialBackedUp,
@@ -315,22 +481,24 @@ async function verifyRegistration(
       }
 
       await Users.patch({
-         userId: unverifiedUser.data.userId,
+         userId: unverifiedUser.userId,
       }).set({
-         verified: true
+         verified: true,
+         lastCredentialId: auth.data.credentialId
       }).go();
 
       // now verified
-      const user: UserItem = {
-         data:{
-            ...unverifiedUser.data,
-            verified: true
-         }
+      const verifiedUser: UserItem = {
+         ...unverifiedUser,
+         verified: true,
+         lastCredentialId: auth.data.credentialId
       };
 
+      startSession = verifiedUser;
+
       const hash = createHash(HASHALG);
-      hash.update(user.data.userId);
-      hash.update(user.data.userCred);
+      hash.update(verifiedUser.userId);
+      hash.update(verifiedUser.userCred);
 
       // This allows us to recreate a deleted User is someone has a recovery link
       // Currently not allowed, but re-creation may be added later (automatically
@@ -345,15 +513,18 @@ async function verifyRegistration(
          console.error('validator creation failed');
       }
 
-      // force consistent read to capture create
-      const authenticators = await loadAuthenticators(user, true);
-      response = await makeUserInfoResponse(user, undefined, authenticators);
+      // force consistent read to capture recent create
+      const authenticators = await loadAuthenticators(verifiedUser, true);
+      responseBody = await makeLoginUserInfoResponse(verifiedUser, authenticators);
    }
 
    // Let this happen async
-   recordEvent(EventNames.RegVerfiy, unverifiedUser.data.userId, eventCredId);
+   recordEvent(EventNames.RegVerfiy, unverifiedUser.userId, verification.registrationInfo?.credential.id);
 
-   return JSON.stringify(response);
+   return {
+      body: JSON.stringify(responseBody),
+      startSession: startSession
+   };
 }
 
 
@@ -362,12 +533,12 @@ async function authenticationOptions(
    rpOrigin: string,
    params: QParams,
    body: string
-): Promise<string> {
+): Promise<Response> {
 
    // If no userid is provided, then we don't return allowed creds and
    // the user is forced to pick one on their own. That happens when the user is
    // linking a new device to a existing passkey or has fully signed out
-   let allowedCreds = undefined;
+   let allowedCreds: PublicKeyCredentialDescriptorJSON[] | undefined = undefined;
    let userId = UnknownUserId;
 
    if (params.userid) {
@@ -375,10 +546,10 @@ async function authenticationOptions(
       // so it would take an eternity (and size-large aws bills for me)
       const unverifiedUser = await getUnverifiedUser(params.userid);
 
-      userId = unverifiedUser.data.userId;
+      userId = unverifiedUser.userId;
 
       const auths = await Authenticators.query.byUserId({
-         userId: unverifiedUser.data.userId
+         userId: unverifiedUser.userId
       }).go();
 
       // a user id without authenticator creds was never verified, so reject
@@ -389,12 +560,12 @@ async function authenticationOptions(
       allowedCreds = auths.data.map((cred: AuthItem) => ({
          id: cred.credentialId,
          type: 'public-key',
-         transports: cred.transports,
+         transports: cred.transports as AuthenticatorTransportFuture[],
       }));
    }
 
    try {
-      const options = await generateAuthenticationOptions({
+      const options: PublicKeyCredentialRequestOptionsJSON = await generateAuthenticationOptions({
          allowCredentials: allowedCreds,
          rpID: rpID,
          userVerification: 'preferred',
@@ -408,7 +579,7 @@ async function authenticationOptions(
       // there could be none or multiple
       recordEvent(EventNames.AuthOptions, userId);
 
-      return JSON.stringify(options);
+      return { body: JSON.stringify(options) };
 
    } catch (err) {
       console.error(err);
@@ -422,10 +593,9 @@ async function registrationOptions(
    rpOrigin: string,
    params: QParams,
    body: string
-): Promise<string> {
+): Promise<Response> {
 
-   // TODO: Improve use of ElectoDB types
-   let user: any;
+   let unverifiedUser: UserItem;
 
    if (params.userid) {
       // means this is a known user who is creating a new credential cannot
@@ -434,7 +604,7 @@ async function registrationOptions(
          throw new ParamError('cannot specify username for existing user');
       }
 
-      user = await getVerifiedUser(params.userid, params.usercred);
+      unverifiedUser = await getUnverifiedUser(params.userid);
 
    } else {
       // Totally new users, must provide a username
@@ -451,13 +621,22 @@ async function registrationOptions(
 
       // Reduce round-trips by getting enough data for 3 x 16 bytes ID tries
       // and 1 x 32 bytes userCred
-      const randData = randomBytes(RETRIES * USERID_BYTES + USERCRED_BYTES);
+      const rparams = {
+            NumberOfBytes: RETRIES * USERID_BYTES + USERCRED_BYTES + RECOVERYID_BYTES
+      };
+      const rand = new GenerateRandomCommand(rparams);
+      const result = await kmsClient.send(rand);
+
+      const randData = result.Plaintext;
+      if (!randData || randData.byteLength != rparams.NumberOfBytes ) {
+         throw new Error("GenerateRandomCommand failure");
+      }
 
       // Loop in the very unlikley event that we randomly pick
       // a duplicate (out of 3.4e38 possible)
       for (let i = 0; i < RETRIES; ++i) {
          const uIdBytes = randData.slice(i * USERID_BYTES, (i + 1) * USERID_BYTES);
-         uId = base64UrlEncode(uIdBytes);
+         uId = base64UrlEncode(uIdBytes)!;
 
          const users = await Users.query.byUserId({
             userId: uId
@@ -475,32 +654,44 @@ async function registrationOptions(
       }
 
       const userCred = randData.slice(RETRIES * USERID_BYTES, RETRIES * USERID_BYTES + USERCRED_BYTES);
-      const b64Key = base64UrlEncode(userCred);
+      const b64Cred = base64UrlEncode(userCred)!;
+      const userCredEnc = await encryptField(
+         userCred,
+         { userId: uId }
+      );
 
-      const mn = generateMnemonic(wordlist, 128);
-      const id = mnemonicToEntropy(mn, wordlist);
-      const recoveryId = base64UrlEncode(id);
+      const recoveryId = randData.slice(randData.byteLength - RECOVERYID_BYTES);
+      const recoveryIdEnc = await encryptField(
+         recoveryId,
+         { userId: uId }
+      );
 
-      user = await Users.create({
+      const created = await Users.create({
          userId: uId,
          userName: params.username,
-         userCred: b64Key,
-         recoveryId: recoveryId
+         userCred: b64Cred,
+         userCredEnc: userCredEnc,
+         recoveryIdEnc: recoveryIdEnc
       }).go();
+
+      if (!created || !created.data) {
+         throw new ParamError('user not created or found')
+      }
+
+      unverifiedUser = created.data;
    }
 
-   if (!user || !user.data) {
+   if (!unverifiedUser) {
       throw new ParamError('user not created or found')
    }
 
    try {
-      const options = await generateRegistrationOptions({
+      const options: PublicKeyCredentialCreationOptionsJSON = await generateRegistrationOptions({
          rpName: RPNAME,
          rpID: rpID,
-         userID: base64UrlDecode(user.data.userId),
-         userName: user.data.userName,
+         userID: base64UrlDecode(unverifiedUser.userId),
+         userName: unverifiedUser.userName,
          attestationType: 'none',
-         userVerification: 'preferred',
          authenticatorSelection: {
             residentKey: 'required',
             userVerification: 'preferred',
@@ -513,9 +704,9 @@ async function registrationOptions(
       }).go();
 
       // Let this happen async
-      recordEvent(EventNames.RegOptions, user.data.userId);
+      recordEvent(EventNames.RegOptions, unverifiedUser.userId);
 
-      return JSON.stringify(options);
+      return { body: JSON.stringify(options) };
    } catch (err) {
       console.error(err);
       throw new Error('unable to generate registration options');
@@ -523,30 +714,61 @@ async function registrationOptions(
 };
 
 
+async function makeLoginUserInfoResponse(
+   verifiedUser: UserItem,
+   auths?: AuthenticatorInfo[]
+) : Promise<LoginUserInfo> {
+
+   const userInfo = await makeUserInfoResponse(verifiedUser, auths);
+
+   try {
+      const userCred = await decryptField(
+         verifiedUser.userCredEnc,
+         { userId: verifiedUser.userId },
+         USERCRED_BYTES
+      );
+
+      let recoveryId: string | undefined;
+      if(verifiedUser.recoveryIdEnc) {
+         recoveryId = await decryptField(
+            verifiedUser.recoveryIdEnc,
+            { userId: verifiedUser.userId },
+            RECOVERYID_BYTES
+         );
+      }
+
+      return {
+         ...userInfo,
+         userCred: userCred,
+         recoveryId: recoveryId,
+         pkId: verifiedUser.lastCredentialId
+      };
+
+   } catch(error) {
+      console.error("auth setup errror", error);
+      throw new AuthError('auth setup error');
+   }
+}
+
+
 async function makeUserInfoResponse(
-   user: UserItem,
-   overRides?: Record<string,any>,
+   verifiedUser: UserItem,
    auths?: AuthenticatorInfo[]
 ) : Promise<UserInfo> {
-   // simple error check, don't expt userId to be an override
-   if(overRides && 'userId' in overRides) {
-      throw new Error('invalid override values');
-   }
 
-   auths = auths ?? await loadAuthenticators(user);
+   auths = auths ?? await loadAuthenticators(verifiedUser);
 
    // user explicit assignment rather than spread operator to prevent leading information
    // in UserItem table that is internal only or provided separatly (like recoveryId)
-   let userInfo: UserInfo = {
-      verified: user.data.verified,
-      userCred: user.data.userCred,
-      userId: user.data.userId,
-      userName: user.data.userName,
-      hasRecoveryId: user.data.recoveryId && user.data.recoveryId.length > 0,
+   const userInfo: UserInfo = {
+      verified: verifiedUser.verified,
+      userId: verifiedUser.userId,
+      userName: verifiedUser.userName,
+      hasRecoveryId: !!verifiedUser.recoveryIdEnc && verifiedUser.recoveryIdEnc.length > 0,
       authenticators: auths
    };
 
-   return Object.assign(userInfo, overRides);
+   return userInfo;
 }
 
 
@@ -554,11 +776,13 @@ async function putDescription(
    rpID: string,
    rpOrigin: string,
    params: QParams,
-   body: string
-): Promise<string> {
+   body: string,
+   verifiedUser?: UserItem
+): Promise<Response> {
 
-   const user = await getVerifiedUser(params.userid, params.usercred);
-
+   if (!verifiedUser) {
+      throw new ParamError('user not found')
+   }
    if (!body) {
       throw new ParamError('missing description');
    }
@@ -570,7 +794,7 @@ async function putDescription(
    }
 
    const patched = await Authenticators.patch({
-      userId: user.data.userId,
+      userId: verifiedUser.userId,
       credentialId: params.credid
    }).set({
       description: body
@@ -581,14 +805,14 @@ async function putDescription(
    }
 
    // force consistent read to capture patch
-   const auths = await loadAuthenticators(user, true);
+   const auths = await loadAuthenticators(verifiedUser, true);
 
    // Let this happen async
-   recordEvent(EventNames.PutDescription, user.data.userId, params.credid);
+   recordEvent(EventNames.PutDescription, verifiedUser.userId, params.credid);
 
    // return with full UserInfo to make client side refresh simpler
-   const response = await makeUserInfoResponse(user, undefined, auths);
-   return JSON.stringify(response);
+   const response = await makeUserInfoResponse(verifiedUser, auths);
+   return { body: JSON.stringify(response) };
 }
 
 
@@ -596,11 +820,13 @@ async function putUserName(
    rpID: string,
    rpOrigin: string,
    params: QParams,
-   body: string
-): Promise<string> {
+   body: string,
+   verifiedUser?: UserItem
+): Promise<Response> {
 
-   const user = await getVerifiedUser(params.userid, params.usercred);
-
+   if (!verifiedUser) {
+      throw new ParamError('user not found')
+   }
    if (!body) {
       throw new ParamError('missing username');
    }
@@ -609,7 +835,7 @@ async function putUserName(
    }
 
    const patched = await Users.patch({
-      userId: user.data.userId
+      userId: verifiedUser.userId
    }).set({
       userName: body
    }).go();
@@ -619,11 +845,12 @@ async function putUserName(
    }
 
    // Let this happen async
-   recordEvent(EventNames.PutUserName, user.data.userId, user.data.userCred);
+   recordEvent(EventNames.PutUserName, verifiedUser.userId, verifiedUser.lastCredentialId);
 
    // return with full UserInfo to make client side refresh simpler
-   const response = await makeUserInfoResponse(user, {userName: body});
-   return JSON.stringify(response);
+   verifiedUser['userName'] = body;
+   const response = await makeUserInfoResponse(verifiedUser);
+   return { body: JSON.stringify(response) };
 }
 
 
@@ -633,11 +860,16 @@ async function getUserInfo(
    rpID: string,
    rpOrigin: string,
    params: QParams,
-   body: string
-): Promise<string> {
-   const user = await getVerifiedUser(params.userid, params.usercred);
-   const response = await makeUserInfoResponse(user);
-   return JSON.stringify(response);
+   body: string,
+   verifiedUser?: UserItem
+): Promise<Response> {
+
+   if (!verifiedUser) {
+      throw new ParamError('user not found')
+   }
+
+   const response = await makeUserInfoResponse(verifiedUser);
+   return { body: JSON.stringify(response) };
 }
 
 // Not tracking events for this method since they are frequent and not particlyarly
@@ -646,22 +878,27 @@ async function getAuthenticators(
    rpID: string,
    rpOrigin: string,
    params: QParams,
-   body: string
-): Promise<string> {
-   const user = await getVerifiedUser(params.userid, params.usercred);
-   const resonse = await loadAuthenticators(user);
-   return JSON.stringify(resonse);
+   body: string,
+   verifiedUser?: UserItem
+): Promise<Response> {
+
+   if (!verifiedUser) {
+      throw new ParamError('user not found')
+   }
+
+   const resonse = await loadAuthenticators(verifiedUser);
+   return { body: JSON.stringify(resonse) };
 }
 
 
 // TODO make better use of ElectodB types for return...
 async function loadAuthenticators(
-   user: UserItem,
+   verifiedUser: UserItem,
    consistent: boolean = false
 ): Promise<AuthenticatorInfo[]> {
 
    const auths = await Authenticators.query.byUserId({
-      userId: user.data.userId
+      userId: verifiedUser.userId
    }).go({
       attributes: ['description', 'credentialId', 'aaguid', 'createdAt'],
       consistent: consistent
@@ -683,8 +920,8 @@ async function loadAuthenticators(
 
    // const aaguidsGet = [...aaguidsMap.keys()];
 
-   const aaguids = new Set<string>(auths.data.map((cred: AuthItem) => cred.aaguid));
-   const aaguidsGet = Array.from(aaguids).map((aaguid: string) => ({
+   const aaguids = new Set<string>(auths.data.map((cred) => cred.aaguid || ''));
+   const aaguidsGet = Array.from(aaguids).map((aaguid) => ({
       aaguid: aaguid
    }));
 
@@ -700,9 +937,9 @@ async function loadAuthenticators(
       });
    }
 
-   const authenticators: AuthenticatorInfo[] = auths.data.map((cred: AuthItem) => ({
+   const authenticators: AuthenticatorInfo[] = auths.data.map((cred) => ({
       credentialId: cred.credentialId,
-      description: cred.description,
+      description: cred.description || '',
       lightIcon: aaguidsMap.get(cred.aaguid).lightIcon ?? lightFileDefault,
       darkIcon: aaguidsMap.get(cred.aaguid).darkIcon ?? darkFileDefault,
       name: aaguidsMap.get(cred.aaguid).name ?? 'Passkey',
@@ -716,16 +953,19 @@ async function deleteAuthenticator(
    rpID: string,
    rpOrigin: string,
    params: QParams,
-   body: string
-): Promise<string> {
+   body: string,
+   verifiedUser?: UserItem
+): Promise<Response> {
 
-   const user = await getVerifiedUser(params.userid, params.usercred);
+   if (!verifiedUser) {
+      throw new ParamError('user not found')
+   }
    if (!params.credid) {
       throw new ParamError('missing credid');
    }
 
    const deleted = await Authenticators.delete({
-      userId: user.data.userId,
+      userId: verifiedUser.userId,
       credentialId: params.credid
    }).go();
 
@@ -734,7 +974,7 @@ async function deleteAuthenticator(
    }
 
    // force consistent read to capture delete
-   const auths = await loadAuthenticators(user, true);
+   const auths = await loadAuthenticators(verifiedUser, true);
 
    let response: UserInfo = {
       verified: false
@@ -744,57 +984,21 @@ async function deleteAuthenticator(
    // entire user identity and return unverified UserInfo object
    if (auths.length == 0) {
       const deleted = await Users.delete({
-         userId: user.data.userId
+         userId: verifiedUser.userId
       }).go();
 
       if (!deleted || !deleted.data) {
          throw new ParamError('user not found');
       }
       // Let this happen async
-      recordEvent(EventNames.UserDelete, user.data.userId, params.credid);
+      recordEvent(EventNames.UserDelete, verifiedUser.userId, params.credid);
    } else {
-      response = await makeUserInfoResponse(user, undefined, auths);
-      recordEvent(EventNames.RegDelete, user.data.userId, params.credid);
+      response = await makeUserInfoResponse(verifiedUser, auths);
+      recordEvent(EventNames.RegDelete, verifiedUser.userId, params.credid);
    }
 
-   return JSON.stringify(response);
+   return { body: JSON.stringify(response) };
 }
-
-async function getRecovery(
-   rpID: string,
-   rpOrigin: string,
-   params: QParams,
-   body: string
-): Promise<string> {
-
-   const user = await getVerifiedUser(params.userid, params.usercred);
-
-   if(!user.data.recoveryId || user.data.recoveryId.length == 0){
-      const mn = generateMnemonic(wordlist, 128);
-      const id = mnemonicToEntropy(mn, wordlist);
-      const recoveryId = base64UrlEncode(id);
-
-      const patched = await Users.patch({
-         userId: user.data.userId,
-      }).set({
-         recoveryId: recoveryId
-      }).go();
-
-      if (!patched || !patched.data) {
-         throw new ParamError('recovery update failed');
-      }
-
-      user.data['recoveryId'] = recoveryId;
-   }
-
-   // Let this happen async
-   recordEvent(EventNames.GetRecovery, user.data.userId, user.data.userCred);
-
-   return JSON.stringify({
-      recoveryId: user.data.recoveryId
-   });
-}
-
 
 // recover removes all existing passkeys, then initiates the
 // process or creating a new passkey. Caller is expected to followup
@@ -804,7 +1008,11 @@ async function recovery(
    rpOrigin: string,
    params: QParams,
    body: string
-): Promise<string> {
+): Promise<Response> {
+
+   if (!params.usercred || params.usercred.length < 10) {
+      throw new ParamError('missing user credential');
+   }
 
    // Ensure recovery link is valid
    const hash = createHash(HASHALG);
@@ -819,33 +1027,23 @@ async function recovery(
       throw new ParamError('invalid recovery values')
    }
 
-   // Currently, require an existing user for recovery
-   const user = await getVerifiedUser(params.userid, params.usercred);
+   // Require an existing user for recovery
+   const unverifiedUser = await getUnverifiedUser(params.userid,);
 
-   if (user.data.recoveryId && user.data.recoveryId.length > 1) {
+   if (unverifiedUser.userCred !== params.usercred || !unverifiedUser.verified) {
+      // vague error to make guessing harder
+      throw new ParamError('user not found')
+   }
+
+   // now verified
+   const verifiedUser = unverifiedUser;
+
+   if (verifiedUser.recoveryIdEnc && verifiedUser.recoveryIdEnc.length > 1) {
       throw new ParamError('must use recovery words instead');
    }
 
-   /* Use the follow To support automatic user re-creation
-    *
-   let user: any;
-   try {
-      user = await getVerifiedUser(params.userid, params.usercred);
-   } catch (err) {
-      if (!(err instanceof ParamError)) {
-         throw err;
-      }
-
-      // Recreate a user since there are valid (previously known) recovery values
-      user = await Users.create({
-         userId: params.userid,
-         userName: 'Placeholder',
-         userCred:  params.usercred
-      }).go();
-   } */
-
    const auths = await Authenticators.query.byUserId({
-      userId: user.data.userId
+      userId: verifiedUser.userId
    }).go({ attributes: ['userId', 'credentialId'] });
 
    // Note that if the creation of a new passkey is aborted or cancels, the account
@@ -855,15 +1053,15 @@ async function recovery(
    if (auths && auths.data.length != 0) {
       const deleted = await Authenticators.delete(auths.data).go();
       // log but continue...
-      if (!deleted || !deleted.data) {
+      if (!deleted) {
          console.error('authenticator delete failed');
       }
    }
 
-   const rcount = user.data.recovered ? user.data.recovered + 1 : 1;
+   const rcount = verifiedUser.recovered ? verifiedUser.recovered + 1 : 1;
 
    const patched = await Users.patch({
-      userId: user.data.userId
+      userId: verifiedUser.userId
    }).set({
       recovered: rcount,
    }).go();
@@ -874,13 +1072,13 @@ async function recovery(
    }
 
    // Let this happen async
-   recordEvent(EventNames.Recover, user.data.userId);
+   recordEvent(EventNames.Recover, verifiedUser.userId);
 
    // caller should followup with call to verifyRegistration
    return registrationOptions(
       rpID,
       rpOrigin,
-      { userid: user.data.userId, usercred: user.data.userCred },
+      { userid: verifiedUser.userId },
       ''
    );
 }
@@ -893,27 +1091,34 @@ async function recovery2(
    rpOrigin: string,
    params: QParams,
    body: string
-): Promise<string> {
+): Promise<Response> {
 
    const unverifiedUser = await getUnverifiedUser(params.userid);
 
    if (!params.recoveryId || params.recoveryId.length < 10) {
       throw new ParamError('missing recovery id');
    }
-   if (!unverifiedUser.data.recoveryId ||
-        unverifiedUser.data.recoveryId.length < 10 ||
-       !unverifiedUser.data.verified) {
+   if (!unverifiedUser.recoveryIdEnc ||
+        unverifiedUser.recoveryIdEnc.length < 10 ||
+       !unverifiedUser.verified) {
       throw new ParamError('invalid recovery id'); // vague on purpose
    }
-   if (unverifiedUser.data.recoveryId !== params.recoveryId) {
+
+   const recoveryId = await decryptField(
+      unverifiedUser.recoveryIdEnc,
+      { userId: unverifiedUser.userId },
+      RECOVERYID_BYTES
+   );
+
+   if (recoveryId !== params.recoveryId) {
       throw new ParamError('invalid recovery id'); // vague on purpose
    }
 
    // now verified
-   const user = unverifiedUser;
+   const verifiedUser = unverifiedUser;
 
    const auths = await Authenticators.query.byUserId({
-      userId: user.data.userId
+      userId: verifiedUser.userId
    }).go({ attributes: ['userId', 'credentialId'] });
 
    // Note that if the creation of a new passkey is aborted or cancels, the account
@@ -923,15 +1128,15 @@ async function recovery2(
    if (auths && auths.data.length != 0) {
       const deleted = await Authenticators.delete(auths.data).go();
       // log but continue...
-      if (!deleted || !deleted.data) {
+      if (!deleted) {
          console.error('authenticator delete failed');
       }
    }
 
-   const rcount = user.data.recovered ? user.data.recovered + 1 : 1;
+   const rcount = verifiedUser.recovered ? verifiedUser.recovered + 1 : 1;
 
    const patched = await Users.patch({
-      userId: user.data.userId
+      userId: verifiedUser.userId
    }).set({
       recovered: rcount,
    }).go();
@@ -942,34 +1147,15 @@ async function recovery2(
    }
 
    // Let this happen async
-   recordEvent(EventNames.Recover, user.data.userId);
+   recordEvent(EventNames.Recover, verifiedUser.userId);
 
    // caller should followup with call to verifyRegistration
    return registrationOptions(
       rpID,
       rpOrigin,
-      { userid: user.data.userId, usercred: user.data.userCred },
+      { userid: verifiedUser.userId },
       ''
    );
-}
-
-// TODO make better use of ElectodB types for return...
-async function getVerifiedUser(userId: string, userCred: string): Promise<UserItem> {
-
-   if (!userCred) {
-      throw new ParamError('missing usercred');
-   }
-
-   const testUser = await getUnverifiedUser(userId);
-
-   if (testUser.data.userCred !== userCred || !testUser.data.verified) {
-      // vague error to make guessing harder
-      throw new ParamError('user not found')
-   }
-
-   // now verified
-   const user = testUser;
-   return user;
 }
 
 // Currently origin is stored on each Authenticator, but it isn't used (other
@@ -980,14 +1166,13 @@ async function getVerifiedUser(userId: string, userCred: string): Promise<UserIt
 // If origin is moved to user, then we could add a test here to confirm the
 // original user origin is used for all following actions.
 //
-// TODO make better use of ElectodB types for return...
-//
 async function getUnverifiedUser(userId: string): Promise<UserItem> {
 
    if (!userId) {
       throw new ParamError('missing userid');
    }
 
+   // May not want to bring back all parameter (like recoveryIdEnc)
    const unverifiedUser = await Users.get({
       userId: userId
    }).go();
@@ -997,7 +1182,7 @@ async function getUnverifiedUser(userId: string): Promise<UserItem> {
       throw new ParamError('user not found')
    }
 
-   return unverifiedUser;
+   return unverifiedUser.data;
 }
 
 async function loadAAGUIDs(
@@ -1005,7 +1190,7 @@ async function loadAAGUIDs(
    rpOrigin: string,
    params: QParams,
    body: string
-): Promise<string> {
+): Promise<Response> {
 
    try {
       const filePath = resolve('./combined.json');
@@ -1034,10 +1219,10 @@ async function loadAAGUIDs(
       }
 
       const results = await AAGUIDs.put(batch).go();
-      return 'success';
+      return { body: 'success' };
    } catch (err) {
       console.error(err);
-      return 'failed';
+      return { body: 'failed' };
    }
 }
 
@@ -1047,7 +1232,7 @@ async function cleanse(
    rpOrigin: string,
    params: QParams,
    body: string
-): Promise<string> {
+): Promise<Response> {
 
    const days = 15;
    const olderThan = Date.now() - (days * 24 * 60 * 60 * 1000);
@@ -1073,7 +1258,7 @@ async function cleanse(
       console.log('nothing to remove');
    }
 
-   return 'done';
+   return { body: 'done' };
 }
 
 async function consistency(
@@ -1081,13 +1266,13 @@ async function consistency(
    rpOrigin: string,
    params: QParams,
    body: string
-): Promise<string> {
+): Promise<Response> {
 
    const batchSize = 14;
 
    if (!params['table'] || params.table == 'authenticators') {
 
-      const authAttrs = ["userId", "credentialId"];
+      const authAttrs = ["userId", "credentialId"] as const;
       let auths = await Authenticators.scan.go({
          attributes: authAttrs,
          limit: batchSize
@@ -1124,7 +1309,7 @@ async function consistency(
 
    } else if (params.table == 'users') {
 
-      const userAttrs = ["userId", "verified", "userName"];
+      const userAttrs = ["userId", "verified", "userName"] as const;
       let users = await Users.scan.go({
          attributes: userAttrs,
          limit: batchSize
@@ -1170,7 +1355,7 @@ async function consistency(
       console.log(`${total} users total, with ${leaked} leaked, and ${unverified} unverified`);
    }
 
-   return "done";
+   return { body: "done" };
 }
 
 async function patch(
@@ -1178,89 +1363,157 @@ async function patch(
    rpOrigin: string,
    params: QParams,
    body: string
-): Promise<string> {
-/*
-   const batchSize = 14;
+): Promise<Response> {
+   // const batchSize = 14;
 
-   const userAttrs = ["userId"];
-   let users = await Users.scan.go({
-      attributes: userAttrs,
-      limit: batchSize
-   });
+   // const userAttrs = ["userId", "userCred"] as const;
+   // let users = await Users.scan.go({
+   //    attributes: userAttrs,
+   //    limit: batchSize
+   // });
 
-   let total = 0;
+   // let total = 0;
 
-   while (users && users.data && users.data.length > 0) {
-      total += users.data.length;
+   // while (users && users.data && users.data.length > 0) {
+   //    total += users.data.length;
 
-      for (let user of users.data) {
-         // fake user to prevent Id use
-         if (user.userId == 'AAAAAAAAAAAAAAAAAAAAAA') {
-            continue;
+   //    for (let user of users.data) {
+   //       // fake user to prevent Id use
+   //       if (user.userId == 'AAAAAAAAAAAAAAAAAAAAAA') {
+   //          continue;
+   //       }
+
+   //       const userCredBytes = base64Decode(user.userCred);
+   //       const enc = new EncryptCommand({
+   //          Plaintext: userCredBytes,
+   //          KeyId: KMS_KEYID,
+   //          EncryptionContext: {
+   //             userId: user.userId
+   //          }
+   //       });
+
+   //       try {
+   //          const result = await kmsClient.send(enc);
+   //          if (!result.CiphertextBlob) {
+   //             throw new Error('Encryption failed for: ' + user);
+   //          }
+
+   //          await Users.patch({
+   //             userId: user.userId,
+   //          }).set({
+   //             userCredEnc: base64UrlEncode(result.CiphertextBlob)
+   //          }).go();
+
+   //          console.log(`set ${user.userId}`)
+
+   //       } catch (error) {
+   //          console.error("Error ", error);
+   //          throw error;
+   //       }
+   //    }
+
+   //    if (!users.cursor) {
+   //       break;
+   //    }
+   //    users = await Users.scan.go({
+   //       attributes: userAttrs,
+   //       limit: batchSize,
+   //       cursor: users.cursor
+   //    });
+   // }
+
+   // console.log(`${total} users total`);
+   return { body: "done" };
+}
+
+// User may be verified or unverified
+async function getJwtKey(user: UserItem) : Promise<Buffer> {
+   if(!jwtMaterial) {
+      jwtMaterial = await setupJwtMaterial();
+   }
+
+   const salt = base64UrlDecode(user.userId)!;
+   const userMaterial = base64UrlDecode(user.userCredEnc)!;
+   const combined = Buffer.concat([userMaterial, jwtMaterial]);
+
+   return Buffer.from(hkdfSync(
+      'sha512',
+      combined,
+      salt,
+      "jwt_key",
+      32
+   ));
+}
+
+async function createCookie(verifiedUser: UserItem): Promise<string> {
+   const jwtKey = await getJwtKey(verifiedUser);
+   const payload = {
+      pkId: verifiedUser.lastCredentialId
+   };
+
+   const token = sign(
+      payload,
+      jwtKey, {
+         algorithm:'HS512',
+         expiresIn: 21600,
+         issuer: 'quickcrypt'
+      }
+   );
+
+   return `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=21600`
+}
+
+async function verifyCookie(unverifiedUser: UserItem, cookie: string): Promise<UserItem> {
+
+   const [name, token] = cookie.split('=');
+   if (name !== '__Host-JWT' || token === undefined) {
+      throw new AuthError('authentication error');
+   }
+
+   const jwtKey = await getJwtKey(unverifiedUser);
+   let payload: JwtPayload;
+
+   try {
+      payload = verify(
+         token,
+         jwtKey, {
+            algorithms:['HS512'],
+            issuer: 'quickcrypt'
          }
+      ) as JwtPayload;
 
-//         const mn = generateMnemonic(wordlist, 128);
-  //       const id = mnemonicToEntropy(mn, wordlist);
-    //     const recoveryId = base64UrlEncode(id);
-
- //        await Users.patch({
-   //         userId: user.userId,
-     //    }).set({
-       //     recoveryId: ""
-       //  }).go();
-
-         console.log(`set ${user.userId} recoveryId to`)
-      }
-
-      if (!users.cursor) {
-         break;
-      }
-      users = await Users.scan.go({
-         attributes: userAttrs,
-         limit: batchSize,
-         cursor: users.cursor
-      });
+   } catch(err) {
+      console.error(err);
+      throw new AuthError('authentication error');
    }
 
-   console.log(`${total} users total`);
-*/
-   return "done";
-}
-
-const FUNCTIONS: {
-   [key: string]: { [key: string]: (r: string, o: string, p: QParams, b: string) => Promise<string> }
-} = {
-   GET: {
-      regoptions: registrationOptions,
-      authoptions: authenticationOptions,
-      authenticators: getAuthenticators,
-      recovery: getRecovery,
-      userinfo: getUserInfo
-   },
-   PUT: {
-      description: putDescription,
-      username: putUserName,
-   },
-   POST: {
-      verifyreg: verifyRegistration,
-      verifyauth: verifyAuthentication,
-      recovery: recovery,
-      recovery2: recovery2,
-      loadaaguids: loadAAGUIDs, // for internal use, don't add to cloudfront
-      cleanse: cleanse, // for internal use, don't add to cloudfront
-      consistency: consistency,  // for internal use, don't add to cloudfront
-      patch: patch  // for internal use, temporary function whose purpose can change
-   },
-   DELETE: {
-      authenticator: deleteAuthenticator,
+   if(!payload ||
+      !payload.pkId ||
+       payload.pkId !== unverifiedUser.lastCredentialId ||
+       payload.iss !== 'quickcrypt'
+   ) {
+      throw new AuthError('authentication error');
    }
+
+   // Now verified
+   const user = unverifiedUser;
+   return user;
 }
 
-function response(body: string, status: number): { [key: string]: string | number } {
+
+function makeResponse(body: string, status: number, cookie?: string): any {
    const resp = {
       statusCode: status,
+      headers: {
+         'Content-Type': 'application/json',
+      } as { [key: string]: string },
       body: body
    };
+
+   if(cookie) {
+      resp.headers["Set-Cookie"] = cookie;
+   }
+
    console.log(`status: ${status} ${status != 200 ? body : ''}`);
    return resp;
 }
@@ -1272,11 +1525,14 @@ async function handler(event: any, context: any) {
 
    if (!event || !event['requestContext'] ||
       !event['requestContext']['http'] || !event['headers'] ||
-      !event['headers']['x-passkey-rpid']) {
-      return response("invalid request, missing context", 400);
+      !event['headers']['x-passkey-rpid']
+   ) {
+      return makeResponse("invalid request, missing context", 400);
    }
 
+   const reqCookie: string | undefined = event['headers']['cookie'];
    const rpID = event['headers']['x-passkey-rpid'];
+
    let rpOrigin = `https://${rpID}`;
    if (event['headers']['x-passkey-port']) {
       rpOrigin += `:${event['headers']['x-passkey-port']}`;
@@ -1290,7 +1546,7 @@ async function handler(event: any, context: any) {
       resource = event['requestContext']['http']['path'].replace(/\//g, '').toLowerCase();
    } catch (err) {
       console.error(err);
-      return response('invalid http request', 400);
+      return makeResponse('invalid http request', 400);
    }
 
    let body = '';
@@ -1301,33 +1557,78 @@ async function handler(event: any, context: any) {
       }
    }
 
-   const func = FUNCTIONS[method][resource]
-   if (!func) {
+   const [func, authorize] = FUNCTIONS[method][resource];
+   if (!func || authorize === undefined) {
       const err = 'no handler for: ' + method + ' ' + resource;
-      return response(err, 404);
+      return makeResponse(err, 404);
    }
 
    const params: QParams = event.queryStringParameters ?? {};
 
    try {
+      let verifiedUser: UserItem | undefined;
+
+      if(authorize) {
+         if(!reqCookie) {
+            throw new AuthError('not authorized');
+         }
+         const unverifiedUser = await getUnverifiedUser(params.userid);
+         verifiedUser = await verifyCookie(unverifiedUser, reqCookie);
+      }
+
       console.log('calling function for: ' + method + ' ' + resource);
       console.log('rpID: ' + rpID + ' rpOrigin: ' + rpOrigin);
       // Uncomment for debugging
       //      console.log('params: ' + JSON.stringify(params));
       //      console.log('body: ' + body);
-      const result = await func(rpID, rpOrigin, params, body);
-      return response(result, 200);
+      //      console.log(`user: ${verifiedUser}`);
+
+      const response = await func(rpID, rpOrigin, params, body, verifiedUser);
+      let respCookie: string | undefined;
+      if (response.startSession) {
+         respCookie = await createCookie(response.startSession);
+      }
+      return makeResponse(response.body, 200, respCookie);
    } catch (err) {
       console.error(err);
       if (err instanceof ParamError) {
-         return response(err.message, 400);
+         return makeResponse(err.message, 400);
+      } else if (err instanceof AuthError) {
+         return makeResponse(err.message, 401);
       } else {
          const msg = err instanceof Error ? err.name : "internal error";
-         return response(msg, 500);
+         return makeResponse(msg, 500);
       }
    }
 }
 
-
+const FUNCTIONS: {
+   [key: string]: { [key: string]: [(r: string, o: string, p: QParams, b: string, u?: UserItem) => Promise<Response>, boolean] }
+} = {
+   GET: {
+      regoptions: [registrationOptions, false],
+      authoptions: [authenticationOptions, false],
+      authenticators: [getAuthenticators, true],
+      userinfo: [getUserInfo, true]
+   },
+   PUT: {
+      description: [putDescription, true],
+      username: [putUserName, true],
+   },
+   POST: {
+      verifysess: [verifySession, true],
+      verifyreg: [verifyRegistration, false],
+      verifyauth: [verifyAuthentication, false],
+      recovery: [recovery, false],
+      recovery2: [recovery2, false],
+      loadaaguids: [loadAAGUIDs, false], // for internal use, don't add to cloudfront
+      cleanse: [cleanse, false], // for internal use, don't add to cloudfront
+      consistency: [consistency, false],  // for internal use, don't add to cloudfront
+      patch: [patch, false]  // for internal use, temporary function whose purpose can change
+   },
+   DELETE: {
+      authenticator: [deleteAuthenticator, true],
+   }
+}
 
 exports.handler = handler;

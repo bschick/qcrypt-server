@@ -1,12 +1,13 @@
-const { Entity } = require("electrodb");
-const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+import { Entity } from "electrodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+
 
 const client = new DynamoDBClient({
    region: "us-east-1",
 });
 
 
-const Users = new Entity(
+export const Users = new Entity(
    {
       model: {
          entity: "user",
@@ -26,7 +27,15 @@ const Users = new Entity(
             type: "string",
             required: true
          },
-         recoveryId: {
+         userCredEnc: {
+            type: "string",
+            required: true
+         },
+         lastCredentialId: {
+            type: "string",
+            required: false
+         },
+         recoveryIdEnc: {
             type: "string",
             required: true
          },
@@ -63,8 +72,7 @@ const Users = new Entity(
    }
 );
 
-
-const Authenticators = new Entity(
+export const Authenticators = new Entity(
    {
       model: {
          entity: "authenticator",
@@ -99,6 +107,7 @@ const Authenticators = new Entity(
          transports: {
             type: "set",
             items: "string",
+            default: () => [],
             required: false
          },
          userVerified: {
@@ -156,7 +165,7 @@ const Authenticators = new Entity(
    }
 );
 
-const Challenges = new Entity(
+export const Challenges = new Entity(
    {
       model: {
          entity: "challenge",
@@ -173,6 +182,7 @@ const Challenges = new Entity(
             // Needs unix time (convert from MS to S) and add 5 minutes after creation
             // Which is a 4 minute buffer since webauthn stuff defaults to 1 minute timeout
             default: () => (Math.floor(Date.now() / 1000) + 300),
+            required: true,
             readOnly: true
          }
       },
@@ -193,7 +203,7 @@ const Challenges = new Entity(
 );
 
 
-const Validators = new Entity(
+export const Validators = new Entity(
    {
       model: {
          entity: "validator",
@@ -228,7 +238,7 @@ const Validators = new Entity(
    }
 );
 
-const AuthEvents = new Entity(
+export const AuthEvents = new Entity(
    {
       model: {
          entity: "event",
@@ -276,7 +286,7 @@ const AuthEvents = new Entity(
    }
 );
 
-const AAGUIDs = new Entity(
+export const AAGUIDs = new Entity(
    {
       model: {
          entity: "aaguid",
@@ -316,10 +326,3 @@ const AAGUIDs = new Entity(
       client: client
    }
 );
-
-exports.AAGUIDs = AAGUIDs;
-exports.Users = Users;
-exports.Authenticators = Authenticators;
-exports.Challenges = Challenges;
-exports.AuthEvents = AuthEvents;
-exports.Validators = Validators;
