@@ -151,7 +151,7 @@ async function decryptField(
    fieldEnc: string,
    context: {[key: string]: string},
    exptectedBytes: number
-) : Promise<string> {
+) : Promise<Uint8Array> {
    if(!KMS_KEYID) {
       throw new Error('missing kms keyid')
    }
@@ -168,7 +168,7 @@ async function decryptField(
       throw new Error('field decryption failed, context:', context);
    }
 
-   return base64UrlEncode(result.Plaintext)!;
+   return result.Plaintext!;
 }
 
 
@@ -184,7 +184,7 @@ async function setupJwtMaterial(): Promise<Uint8Array> {
          JWTMATERIAL_BYTES
       );
 
-      return base64UrlDecode(encodedMaterial)!;
+      return encodedMaterial;
    } catch(error) {
       console.error("auth setup errror", error);
       throw new Error('auth setup error');
@@ -227,7 +227,7 @@ async function verifySession(
    }
 
    // do not start new session because auth was not provided
-   const responseBody = await makeLoginUserInfoResponse(verifiedUser);
+   const responseBody = await makeLoginUserInfoResponse(verifiedUser, true, false);
    return { body: JSON.stringify(responseBody)};
 }
 
@@ -273,7 +273,7 @@ async function verifyAuthentication(
       throw new AuthError('authentication timeout, try again');
    }
 
-   // SimpleWebAuthn renamed these to WebAuthnCredential, so now we have a name missmatch
+   // SimpleWebAuthn renamed these to WebAuthnCredential, so now we have a name missmatch with DB
    const authenticator = await Authenticators.get({
       userId: unverifiedUser.userId,
       credentialId: body.id
@@ -331,7 +331,7 @@ async function verifyAuthentication(
 
       verifiedUser.lastCredentialId = authenticator.data.credentialId;
 
-      if (body.createRecovery &&
+      if (body.includerecovery &&
           (!verifiedUser.recoveryIdEnc || verifiedUser.recoveryIdEnc.length == 0)) {
          const rand = new GenerateRandomCommand({
                NumberOfBytes: RECOVERYID_BYTES
@@ -361,7 +361,7 @@ async function verifyAuthentication(
          verifiedUser['recoveryIdEnc'] = recoveryIdEnc;
       }
 
-      responseBody = await makeLoginUserInfoResponse(verifiedUser);
+      responseBody = await makeLoginUserInfoResponse(verifiedUser, body.includeusercred, body.includerecovery);
    }
 
    // Let this happen async
@@ -515,7 +515,12 @@ async function verifyRegistration(
 
       // force consistent read to capture recent create
       const authenticators = await loadAuthenticators(verifiedUser, true);
-      responseBody = await makeLoginUserInfoResponse(verifiedUser, authenticators);
+      responseBody = await makeLoginUserInfoResponse(
+         verifiedUser,
+         body.includeusercred,
+         body.includerecovery,
+         authenticators
+      );
    }
 
    // Let this happen async
@@ -716,20 +721,25 @@ async function registrationOptions(
 
 async function makeLoginUserInfoResponse(
    verifiedUser: UserItem,
+   includeUserCred: boolean = true, // for client backwords compat
+   includeRecovery: boolean = true,
    auths?: AuthenticatorInfo[]
 ) : Promise<LoginUserInfo> {
 
    const userInfo = await makeUserInfoResponse(verifiedUser, auths);
 
    try {
-      const userCred = await decryptField(
-         verifiedUser.userCredEnc,
-         { userId: verifiedUser.userId },
-         USERCRED_BYTES
-      );
+      let userCred: Uint8Array | undefined;
+      if (includeUserCred){
+         userCred = await decryptField(
+            verifiedUser.userCredEnc,
+            { userId: verifiedUser.userId },
+            USERCRED_BYTES
+         );
+      }
 
-      let recoveryId: string | undefined;
-      if(verifiedUser.recoveryIdEnc) {
+      let recoveryId: Uint8Array | undefined;
+      if(includeRecovery && verifiedUser.recoveryIdEnc) {
          recoveryId = await decryptField(
             verifiedUser.recoveryIdEnc,
             { userId: verifiedUser.userId },
@@ -739,8 +749,8 @@ async function makeLoginUserInfoResponse(
 
       return {
          ...userInfo,
-         userCred: userCred,
-         recoveryId: recoveryId,
+         userCred: base64UrlEncode(userCred),
+         recoveryId: base64UrlEncode(recoveryId),
          pkId: verifiedUser.lastCredentialId
       };
 
@@ -913,17 +923,12 @@ async function loadAuthenticators(
       return left.createdAt - right.createdAt;
    });
 
-   // const aaguidsMap = new Map();
-   // for (let auth of auths.data) {
-   //    aaguidsMap.set(auth.aaguid, '');
-   // }
-
-   // const aaguidsGet = [...aaguidsMap.keys()];
-
    const aaguids = new Set<string>(auths.data.map((cred) => cred.aaguid || ''));
    const aaguidsGet = Array.from(aaguids).map((aaguid) => ({
       aaguid: aaguid
    }));
+
+   // Could add a short-cut for one 00000000 aaguid only
 
    // ElectroDB conversts array get to batch get under the covers
    const aaguidsDetail = await AAGUIDs.get(aaguidsGet).go();
@@ -940,9 +945,9 @@ async function loadAuthenticators(
    const authenticators: AuthenticatorInfo[] = auths.data.map((cred) => ({
       credentialId: cred.credentialId,
       description: cred.description || '',
-      lightIcon: aaguidsMap.get(cred.aaguid).lightIcon ?? lightFileDefault,
-      darkIcon: aaguidsMap.get(cred.aaguid).darkIcon ?? darkFileDefault,
-      name: aaguidsMap.get(cred.aaguid).name ?? 'Passkey',
+      lightIcon: aaguidsMap.get(cred.aaguid)?.lightIcon ?? lightFileDefault,
+      darkIcon: aaguidsMap.get(cred.aaguid)?.darkIcon ?? darkFileDefault,
+      name: aaguidsMap.get(cred.aaguid)?.name ?? 'Passkey',
    }));
 
    return authenticators;
@@ -1110,7 +1115,7 @@ async function recovery2(
       RECOVERYID_BYTES
    );
 
-   if (recoveryId !== params.recoveryId) {
+   if (base64UrlEncode(recoveryId) !== params.recoveryId) {
       throw new ParamError('invalid recovery id'); // vague on purpose
    }
 
