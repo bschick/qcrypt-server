@@ -721,8 +721,8 @@ async function registrationOptions(
 
 async function makeLoginUserInfoResponse(
    verifiedUser: UserItem,
-   includeUserCred: boolean = true, // for client backwords compat
-   includeRecovery: boolean = true,
+   includeUserCred: boolean = true,  // for client backwords compat
+   includeRecovery: boolean = false, // for client backwords compat
    auths?: AuthenticatorInfo[]
 ) : Promise<LoginUserInfo> {
 
@@ -1008,7 +1008,7 @@ async function deleteAuthenticator(
 // recover removes all existing passkeys, then initiates the
 // process or creating a new passkey. Caller is expected to followup
 // with a call to verifyRegistration
-async function recovery(
+async function recover(
    rpID: string,
    rpOrigin: string,
    params: QParams,
@@ -1091,7 +1091,7 @@ async function recovery(
 // recover removes all existing passkeys, then initiates the
 // process or creating a new passkey. Caller is expected to followup
 // with a call to verifyRegistration
-async function recovery2(
+async function recover2(
    rpID: string,
    rpOrigin: string,
    params: QParams,
@@ -1624,8 +1624,8 @@ const FUNCTIONS: {
       verifysess: [verifySession, true],
       verifyreg: [verifyRegistration, false],
       verifyauth: [verifyAuthentication, false],
-      recovery: [recovery, false],
-      recovery2: [recovery2, false],
+      recover: [recover, false],
+      recover2: [recover2, false],
       loadaaguids: [loadAAGUIDs, false], // for internal use, don't add to cloudfront
       cleanse: [cleanse, false], // for internal use, don't add to cloudfront
       consistency: [consistency, false],  // for internal use, don't add to cloudfront
