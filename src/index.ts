@@ -651,6 +651,7 @@ async function deleteAuthenticator(rpID: string, rpOrigin: string, params: QPara
 
    return JSON.stringify({
       credentialId: params.credid,
+      verified: delUserId ? false : true,
       userId: delUserId,
    });
 }
