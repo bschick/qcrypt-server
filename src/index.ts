@@ -40,6 +40,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { sign, verify, type JwtPayload } from 'jsonwebtoken';
+import DOMPurify from 'isomorphic-dompurify';
 
 type QParams = {
    [key: string]: string;
@@ -793,10 +794,11 @@ async function putDescription(
    if (!verifiedUser) {
       throw new ParamError('user not found')
    }
-   if (!body) {
+   const description = DOMPurify.sanitize(body);
+   if (!description) {
       throw new ParamError('missing description');
    }
-   if (body.length < 6 || body.length > 42) {
+   if (description.length < 6 || description.length > 42) {
       throw new ParamError('description must more than 5 and less than 43 character');
    }
    if (!params.credid) {
@@ -807,7 +809,7 @@ async function putDescription(
       userId: verifiedUser.userId,
       credentialId: params.credid
    }).set({
-      description: body
+      description: description
    }).go();
 
    if (!patched || !patched.data) {
@@ -837,17 +839,18 @@ async function putUserName(
    if (!verifiedUser) {
       throw new ParamError('user not found')
    }
-   if (!body) {
+   const userName = DOMPurify.sanitize(body);
+   if (!userName) {
       throw new ParamError('missing username');
    }
-   if (body.length < 6 || body.length > 31) {
+   if (userName.length < 6 || userName.length > 31) {
       throw new ParamError('username must more than 5 and less than 32 character');
    }
 
    const patched = await Users.patch({
       userId: verifiedUser.userId
    }).set({
-      userName: body
+      userName: userName
    }).go();
 
    if (!patched || !patched.data) {
@@ -858,7 +861,7 @@ async function putUserName(
    recordEvent(EventNames.PutUserName, verifiedUser.userId, verifiedUser.lastCredentialId);
 
    // return with full UserInfo to make client side refresh simpler
-   verifiedUser['userName'] = body;
+   verifiedUser['userName'] = userName;
    const response = await makeUserInfoResponse(verifiedUser);
    return { body: JSON.stringify(response) };
 }
