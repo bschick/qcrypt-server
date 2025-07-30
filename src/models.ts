@@ -25,11 +25,11 @@ export const Users = new Entity(
          },
          userCred: {
             type: "string",
-            required: true
+            required: false
          },
          userCredEnc: {
             type: "string",
-            required: true
+            required: false
          },
          lastCredentialId: {
             type: "string",
@@ -37,7 +37,7 @@ export const Users = new Entity(
          },
          recoveryIdEnc: {
             type: "string",
-            required: true
+            required: false
          },
          verified: {
             type: "boolean",

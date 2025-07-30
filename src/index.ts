@@ -23,8 +23,13 @@ import {
    AAGUIDs
 } from "./models";
 
-import { type EntityItem } from 'electrodb';
-type UserItem = EntityItem<typeof Users>;
+import { type EntityItem, type EntityRecord } from 'electrodb';
+type UnverifiedUserItem = EntityItem<typeof Users>;
+type VerifiedUserItem = EntityRecord<typeof Users> & {
+    lastCredentialId?: string;
+    recoveryIdEnc?: string;
+};
+
 type AuthItem = EntityItem<typeof Authenticators>; ;
 
 import {
@@ -47,7 +52,7 @@ type QParams = {
 
 type Response = {
    body: string;
-   startSession?: UserItem;
+   startSession?: VerifiedUserItem;
 };
 
 type AuthenticatorInfo = {
@@ -121,6 +126,23 @@ function base64UrlDecode(base64: string | undefined): Buffer | undefined {
 
 function base64Decode(base64: string | undefined): Buffer | undefined {
    return base64 ? Buffer.from(base64, 'base64') : undefined;
+}
+
+function isVerified(unverifiedUser: UnverifiedUserItem, userId?: string): unverifiedUser is VerifiedUserItem {
+   return unverifiedUser.verified &&
+      unverifiedUser.userId !== undefined && unverifiedUser.userId.length > 0 &&
+      unverifiedUser.userName !== undefined && unverifiedUser.userName.length > 0 &&
+      unverifiedUser.userCred !== undefined && unverifiedUser.userCred.length > 0 &&
+      unverifiedUser.userCredEnc !== undefined && unverifiedUser.userCredEnc.length > 0 &&
+      unverifiedUser.createdAt !== undefined &&
+      unverifiedUser.userId === userId;
+}
+
+function checkVerified(unverifiedUser: UnverifiedUserItem, userId?: string): VerifiedUserItem {
+   if (!isVerified(unverifiedUser, userId)) {
+      throw new Error('user not verified');
+   }
+   return unverifiedUser;
 }
 
 
@@ -219,7 +241,7 @@ async function verifySession(
    rpOrigin: string,
    params: QParams,
    bodyStr: string,
-   verifiedUser?: UserItem
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
    if (!verifiedUser) {
@@ -305,14 +327,14 @@ async function verifyAuthentication(
    }
 
    // Should this be changed to throw and error if no verified?
-   let startSession: UserItem | undefined;
+   let startSession: VerifiedUserItem | undefined;
    let responseBody: LoginUserInfo = {
       verified: verification.verified
    };
 
    if (verification.verified) {
-      // now verified
-      const verifiedUser = unverifiedUser;
+      // should now verified
+      const verifiedUser = checkVerified(unverifiedUser, body.response.userHandle!);
       startSession = verifiedUser
 
       // ok if this fails
@@ -426,7 +448,7 @@ async function verifyRegistration(
    }
 
    // Should this be changed to throw and error if no verified?
-   let startSession: UserItem | undefined;
+   let startSession: VerifiedUserItem | undefined;
    let responseBody: LoginUserInfo = {
       verified: verification.verified
    };
@@ -480,20 +502,62 @@ async function verifyRegistration(
          throw new ParamError('credentail creation failed');
       }
 
-      await Users.patch({
-         userId: unverifiedUser.userId,
-      }).set({
-         verified: true,
-         lastCredentialId: auth.data.credentialId
-      }).go();
-
-      // now verified
-      const verifiedUser: UserItem = {
-         ...unverifiedUser,
-         verified: true,
-         lastCredentialId: auth.data.credentialId
+      const rparams = {
+            NumberOfBytes: USERCRED_BYTES + RECOVERYID_BYTES
       };
+      const rand = new GenerateRandomCommand(rparams);
+      const result = await kmsClient.send(rand);
 
+      const randData = result.Plaintext;
+      if (!randData || randData.byteLength != rparams.NumberOfBytes ) {
+         throw new Error("GenerateRandomCommand failure");
+      }
+
+      // For both backward compat and to reduces calls to KMS for abandonded user
+      // creation we delay creation for userCred and recoveryId until verified.
+      // If this is a new user reg, the user will not have a userCred. If this is
+      // a new authenticator for an existing user, it will have a userCred already
+      if (!unverifiedUser.verified) {
+         // Don't ever overwrite userCred, due to a bug or somethign
+         if(unverifiedUser.userCred) {
+            throw new Error('unexpected userCred');
+         }
+
+         const userCred = randData.slice(0, USERCRED_BYTES);
+         const userCredB64 = base64UrlEncode(userCred)!;
+         const userCredEnc = await encryptField(
+            userCred,
+            { userId: unverifiedUser.userId }
+         );
+
+         // for temporary backward compat, don't add for old client versions that don't sent this
+         let recoveryIdEnc: string | undefined;
+         if(body.includerecovery) {
+            const recoveryId = randData.slice(USERCRED_BYTES);
+            recoveryIdEnc = await encryptField(
+               recoveryId,
+               { userId: unverifiedUser.userId }
+         );}
+
+         await Users.patch({
+            userId: unverifiedUser.userId,
+         }).set({
+            verified: true,
+            userCred: userCredB64,
+            userCredEnc: userCredEnc,
+            recoveryIdEnc: recoveryIdEnc,
+            lastCredentialId: auth.data.credentialId
+         }).go();
+
+         unverifiedUser.verified = true;
+         unverifiedUser.userCred = userCredB64;
+         unverifiedUser.userCredEnc = userCredEnc;
+         unverifiedUser.recoveryIdEnc = recoveryIdEnc;
+         unverifiedUser.lastCredentialId = auth.data.credentialId;
+      }
+
+      // shoulw now be verified
+      const verifiedUser = checkVerified(unverifiedUser, body.userId);
       startSession = verifiedUser;
 
       const hash = createHash(HASHALG);
@@ -600,7 +664,7 @@ async function registrationOptions(
    body: string
 ): Promise<Response> {
 
-   let unverifiedUser: UserItem;
+   let unverifiedUser: UnverifiedUserItem;
 
    if (params.userid) {
       // means this is a known user who is creating a new credential cannot
@@ -658,25 +722,25 @@ async function registrationOptions(
          throw new Error('could not allocate userId');
       }
 
-      const userCred = randData.slice(RETRIES * USERID_BYTES, RETRIES * USERID_BYTES + USERCRED_BYTES);
-      const b64Cred = base64UrlEncode(userCred)!;
-      const userCredEnc = await encryptField(
-         userCred,
-         { userId: uId }
-      );
+      // const userCred = randData.slice(RETRIES * USERID_BYTES, RETRIES * USERID_BYTES + USERCRED_BYTES);
+      // const b64Cred = base64UrlEncode(userCred)!;
+      // const userCredEnc = await encryptField(
+      //    userCred,
+      //    { userId: uId }
+      // );
 
-      const recoveryId = randData.slice(randData.byteLength - RECOVERYID_BYTES);
-      const recoveryIdEnc = await encryptField(
-         recoveryId,
-         { userId: uId }
-      );
+      // const recoveryId = randData.slice(randData.byteLength - RECOVERYID_BYTES);
+      // const recoveryIdEnc = await encryptField(
+      //    recoveryId,
+      //    { userId: uId }
+      // );
 
       const created = await Users.create({
          userId: uId,
          userName: params.username,
-         userCred: b64Cred,
-         userCredEnc: userCredEnc,
-         recoveryIdEnc: recoveryIdEnc
+         userCred: undefined,
+         userCredEnc: undefined,
+         recoveryIdEnc: undefined
       }).go();
 
       if (!created || !created.data) {
@@ -720,7 +784,7 @@ async function registrationOptions(
 
 
 async function makeLoginUserInfoResponse(
-   verifiedUser: UserItem,
+   verifiedUser: VerifiedUserItem,
    includeUserCred: boolean = true,  // for client backwords compat
    includeRecovery: boolean = false, // for client backwords compat
    auths?: AuthenticatorInfo[]
@@ -762,7 +826,7 @@ async function makeLoginUserInfoResponse(
 
 
 async function makeUserInfoResponse(
-   verifiedUser: UserItem,
+   verifiedUser: VerifiedUserItem,
    auths?: AuthenticatorInfo[]
 ) : Promise<UserInfo> {
 
@@ -787,7 +851,7 @@ async function putDescription(
    rpOrigin: string,
    params: QParams,
    body: string,
-   verifiedUser?: UserItem
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
    if (!verifiedUser) {
@@ -831,7 +895,7 @@ async function putUserName(
    rpOrigin: string,
    params: QParams,
    body: string,
-   verifiedUser?: UserItem
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
    if (!verifiedUser) {
@@ -871,7 +935,7 @@ async function getUserInfo(
    rpOrigin: string,
    params: QParams,
    body: string,
-   verifiedUser?: UserItem
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
    if (!verifiedUser) {
@@ -889,7 +953,7 @@ async function getAuthenticators(
    rpOrigin: string,
    params: QParams,
    body: string,
-   verifiedUser?: UserItem
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
    if (!verifiedUser) {
@@ -901,9 +965,8 @@ async function getAuthenticators(
 }
 
 
-// TODO make better use of ElectodB types for return...
 async function loadAuthenticators(
-   verifiedUser: UserItem,
+   verifiedUser: VerifiedUserItem,
    consistent: boolean = false
 ): Promise<AuthenticatorInfo[]> {
 
@@ -959,7 +1022,7 @@ async function deleteAuthenticator(
    rpOrigin: string,
    params: QParams,
    body: string,
-   verifiedUser?: UserItem
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
    if (!verifiedUser) {
@@ -1120,7 +1183,7 @@ async function recover2(
    }
 
    // now verified
-   const verifiedUser = unverifiedUser;
+   const verifiedUser = checkVerified(unverifiedUser, params.userid);
 
    const auths = await Authenticators.query.byUserId({
       userId: verifiedUser.userId
@@ -1171,7 +1234,7 @@ async function recover2(
 // If origin is moved to user, then we could add a test here to confirm the
 // original user origin is used for all following actions.
 //
-async function getUnverifiedUser(userId: string): Promise<UserItem> {
+async function getUnverifiedUser(userId: string): Promise<UnverifiedUserItem> {
 
    if (!userId) {
       throw new ParamError('missing userid');
@@ -1432,7 +1495,7 @@ async function patch(
 }
 
 // User may be verified or unverified
-async function getJwtKey(user: UserItem) : Promise<Buffer> {
+async function getJwtKey(user: UnverifiedUserItem) : Promise<Buffer> {
    if(!jwtMaterial) {
       jwtMaterial = await setupJwtMaterial();
    }
@@ -1450,7 +1513,7 @@ async function getJwtKey(user: UserItem) : Promise<Buffer> {
    ));
 }
 
-async function createCookie(verifiedUser: UserItem): Promise<string> {
+async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
    const jwtKey = await getJwtKey(verifiedUser);
    const payload = {
       pkId: verifiedUser.lastCredentialId
@@ -1468,7 +1531,7 @@ async function createCookie(verifiedUser: UserItem): Promise<string> {
    return `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=21600`
 }
 
-async function verifyCookie(unverifiedUser: UserItem, cookie: string): Promise<UserItem> {
+async function verifyCookie(unverifiedUser: UnverifiedUserItem, cookie: string): Promise<VerifiedUserItem> {
 
    const [name, token] = cookie.split('=');
    if (name !== '__Host-JWT' || token === undefined) {
@@ -1501,8 +1564,7 @@ async function verifyCookie(unverifiedUser: UserItem, cookie: string): Promise<U
    }
 
    // Now verified
-   const user = unverifiedUser;
-   return user;
+   return checkVerified(unverifiedUser, unverifiedUser.userId);
 }
 
 
@@ -1571,7 +1633,7 @@ async function handler(event: any, context: any) {
    const params: QParams = event.queryStringParameters ?? {};
 
    try {
-      let verifiedUser: UserItem | undefined;
+      let verifiedUser: VerifiedUserItem | undefined;
 
       if(authorize) {
          if(!reqCookie) {
@@ -1608,7 +1670,7 @@ async function handler(event: any, context: any) {
 }
 
 const FUNCTIONS: {
-   [key: string]: { [key: string]: [(r: string, o: string, p: QParams, b: string, u?: UserItem) => Promise<Response>, boolean] }
+   [key: string]: { [key: string]: [(r: string, o: string, p: QParams, b: string, u?: VerifiedUserItem) => Promise<Response>, boolean] }
 } = {
    GET: {
       regoptions: [registrationOptions, false],
