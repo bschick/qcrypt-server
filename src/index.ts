@@ -45,7 +45,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { sign, verify, type JwtPayload } from 'jsonwebtoken';
-import DOMPurify from 'isomorphic-dompurify';
+import sanitizeHtml from 'sanitize-html';
 
 type QParams = {
    [key: string]: string;
@@ -681,7 +681,8 @@ async function registrationOptions(
       if (!params.username) {
          throw new ParamError('must provide username or userid');
       }
-      if (params.username.length < 6 || params.username.length > 31) {
+      const userName = sanitizeHtml(params.username);
+      if (userName.length < 6 || userName.length > 31) {
          throw new ParamError('username must greater than 5 and less than 32 character');
       }
 
@@ -738,7 +739,7 @@ async function registrationOptions(
 
       const created = await Users.create({
          userId: uId,
-         userName: params.username,
+         userName: userName,
          userCred: undefined,
          userCredEnc: undefined,
          recoveryIdEnc: undefined
@@ -858,7 +859,7 @@ async function putDescription(
    if (!verifiedUser) {
       throw new ParamError('user not found')
    }
-   const description = DOMPurify.sanitize(body);
+   const description = sanitizeHtml(body);
    if (!description) {
       throw new ParamError('missing description');
    }
@@ -866,7 +867,7 @@ async function putDescription(
       throw new ParamError('description must more than 5 and less than 43 character');
    }
    if (!params.credid) {
-      throw new ParamError('missing credid');
+      throw new ParamError('missing credential id');
    }
 
    const patched = await Authenticators.patch({
@@ -903,7 +904,7 @@ async function putUserName(
    if (!verifiedUser) {
       throw new ParamError('user not found')
    }
-   const userName = DOMPurify.sanitize(body);
+   const userName = sanitizeHtml(body);
    if (!userName) {
       throw new ParamError('missing username');
    }
@@ -1032,7 +1033,7 @@ async function deleteAuthenticator(
       throw new ParamError('user not found')
    }
    if (!params.credid) {
-      throw new ParamError('missing credid');
+      throw new ParamError('missing credential id');
    }
 
    const deleted = await Authenticators.delete({
