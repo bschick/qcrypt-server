@@ -14,6 +14,7 @@ import type {
    AuthenticatorTransportFuture,
    PublicKeyCredentialDescriptorJSON
 } from '@simplewebauthn/server';
+
 import {
    Users,
    Authenticators,
@@ -29,7 +30,6 @@ type VerifiedUserItem = EntityRecord<typeof Users> & {
    lastCredentialId?: string;
    recoveryIdEnc?: string;
 };
-
 type AuthItem = EntityItem<typeof Authenticators>;;
 
 import {
@@ -125,6 +125,7 @@ class ParamError extends Error {
 class AuthError extends Error {
 }
 
+
 function base64UrlEncode(bytes: Uint8Array | undefined): string | undefined {
    return bytes ? Buffer.from(bytes).toString('base64url') : undefined;
 }
@@ -136,6 +137,7 @@ function base64UrlDecode(base64: string | undefined): Buffer | undefined {
 function base64Decode(base64: string | undefined): Buffer | undefined {
    return base64 ? Buffer.from(base64, 'base64') : undefined;
 }
+
 
 function isVerified(unverifiedUser: UnverifiedUserItem, userId?: string): unverifiedUser is VerifiedUserItem {
    return unverifiedUser.verified &&
@@ -342,7 +344,7 @@ async function verifyAuthentication(
    };
 
    if (verification.verified) {
-      // should now verified
+      // should now be verified
       const verifiedUser = checkVerified(unverifiedUser, body.response.userHandle!);
       startSession = verifiedUser
 
@@ -522,14 +524,14 @@ async function verifyRegistration(
          throw new Error("GenerateRandomCommand failure");
       }
 
-      // For both backward compat and to reduces calls to KMS for abandonded user
-      // creation we delay creation for userCred and recoveryId until verified.
-      // If this is a new user reg, the user will not have a userCred. If this is
-      // a new authenticator for an existing user, it will have a userCred already
+      // For both backward compat and to reduces calls to KMS whe user creation
+      // is abandonded, delay creation for userCred and recoveryId until now.
+      // If this is a new user reg, verified is false and the user will not have
+      // a userCred or recoveryId
       if (!unverifiedUser.verified) {
-         // Don't ever overwrite userCred, due to a bug or somethign
-         if (unverifiedUser.userCred) {
-            throw new Error('unexpected userCred');
+         // Don't ever overwrite userCred (due to a bug or whatever)
+         if (unverifiedUser.userCred || unverifiedUser.userCredEnc || unverifiedUser.recoveryIdEnc) {
+            throw new Error('unexpected user credential or recovery id');
          }
 
          const userCred = randData.slice(0, USERCRED_BYTES);
@@ -566,7 +568,7 @@ async function verifyRegistration(
          unverifiedUser.lastCredentialId = auth.data.credentialId;
       }
 
-      // shoulw now be verified
+      // should now be verified
       const verifiedUser = checkVerified(unverifiedUser, body.userId);
       startSession = verifiedUser;
 
@@ -703,7 +705,7 @@ async function registrationOptions(
       // Reduce round-trips by getting enough data for 3 x 16 bytes ID tries
       // and 1 x 32 bytes userCred
       const rparams = {
-         NumberOfBytes: RETRIES * USERID_BYTES + USERCRED_BYTES + RECOVERYID_BYTES
+         NumberOfBytes: RETRIES * USERID_BYTES
       };
       const rand = new GenerateRandomCommand(rparams);
       const result = await kmsClient.send(rand);
@@ -1185,7 +1187,7 @@ async function recover2(
       throw new ParamError('invalid recovery id'); // vague on purpose
    }
 
-   // now verified
+   // should now be verified
    const verifiedUser = checkVerified(unverifiedUser, params.userid);
 
    const auths = await Authenticators.query.byUserId({
@@ -1566,7 +1568,7 @@ async function verifyCookie(unverifiedUser: UnverifiedUserItem, cookie: string):
       throw new AuthError('authentication error');
    }
 
-   // Now verified
+   // should now be verified
    return checkVerified(unverifiedUser, unverifiedUser.userId);
 }
 
