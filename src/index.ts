@@ -734,19 +734,6 @@ async function registrationOptions(
          throw new Error('could not allocate userId');
       }
 
-      // const userCred = randData.slice(RETRIES * USERID_BYTES, RETRIES * USERID_BYTES + USERCRED_BYTES);
-      // const b64Cred = base64UrlEncode(userCred)!;
-      // const userCredEnc = await encryptField(
-      //    userCred,
-      //    { userId: uId }
-      // );
-
-      // const recoveryId = randData.slice(randData.byteLength - RECOVERYID_BYTES);
-      // const recoveryIdEnc = await encryptField(
-      //    recoveryId,
-      //    { userId: uId }
-      // );
-
       const created = await Users.create({
          userId: uId,
          userName: userName,
