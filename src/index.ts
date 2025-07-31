@@ -688,7 +688,7 @@ async function registrationOptions(
       unverifiedUser = await getUnverifiedUser(params.userid);
 
    } else {
-      // Totally new users, must provide a username
+      // Totally new user, must provide a username
       if (!body) {
          throw new ParamError('must provide username or userid');
       }
@@ -1537,16 +1537,19 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
    const token = sign(
       payload,
       jwtKey, {
-      algorithm: 'HS512',
-      expiresIn: 21600,
-      issuer: 'quickcrypt'
-   }
+         algorithm: 'HS512',
+         expiresIn: 21600,
+         issuer: 'quickcrypt'
+      }
    );
 
    return `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=21600`
 }
 
-async function verifyCookie(unverifiedUser: UnverifiedUserItem, cookie: string): Promise<VerifiedUserItem> {
+async function verifyCookie(
+   unverifiedUser: UnverifiedUserItem,
+   cookie: string
+): Promise<VerifiedUserItem> {
 
    const [name, token] = cookie.split('=');
    if (name !== '__Host-JWT' || token === undefined) {
@@ -1560,9 +1563,9 @@ async function verifyCookie(unverifiedUser: UnverifiedUserItem, cookie: string):
       payload = verify(
          token,
          jwtKey, {
-         algorithms: ['HS512'],
-         issuer: 'quickcrypt'
-      }
+            algorithms: ['HS512'],
+            issuer: 'quickcrypt'
+         }
       ) as JwtPayload;
 
    } catch (err) {
@@ -1571,14 +1574,13 @@ async function verifyCookie(unverifiedUser: UnverifiedUserItem, cookie: string):
    }
 
    if (!payload ||
-      !payload.pkId ||
-      payload.pkId !== unverifiedUser.lastCredentialId ||
-      payload.iss !== 'quickcrypt'
+       !payload.pkId ||
+       payload.pkId !== unverifiedUser.lastCredentialId ||
+       payload.iss !== 'quickcrypt'
    ) {
       throw new AuthError('authentication error');
    }
 
-   // should now be verified
    return checkVerified(unverifiedUser, unverifiedUser.userId);
 }
 
@@ -1641,8 +1643,8 @@ async function handler(event: any, context: any) {
 
    const [func, authorize] = FUNCTIONS[method][resource];
    if (!func || authorize === undefined) {
-      const err = 'no handler for: ' + method + ' ' + resource;
-      return makeResponse(err, 404);
+      const msg = `no handler for: ${method} ${resource}`;
+      return makeResponse(msg, 404);
    }
 
    const params: QParams = event.queryStringParameters ?? {};
