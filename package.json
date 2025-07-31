@@ -5,7 +5,7 @@
   "main": "index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build":    "esbuild --bundle          --platform=node --target=es2022 --outdir=build src/index.ts && rm -f ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js ./assets/aaguid/combined.json",
+    "build": "esbuild --bundle          --platform=node --target=es2022 --outdir=build src/index.ts && rm -f ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js ./assets/aaguid/combined.json",
     "buildmin": "esbuild --bundle --minify --platform=node --target=es2022 --outdir=build src/index.ts && rm -f ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js ./assets/aaguid/combined.json"
   },
   "author": "",
@@ -14,7 +14,6 @@
     "@aws-sdk/types": "^3.840.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.15",
-    "@types/sanitize-html": "^2.16.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.8.0"
   },
@@ -24,6 +23,6 @@
     "@simplewebauthn/server": "^13.0.0",
     "electrodb": "^3.4.0",
     "jsonwebtoken": "^9.0.2",
-    "sanitize-html": "^2.17.0"
+    "xss": "^1.0.15"
   }
 }

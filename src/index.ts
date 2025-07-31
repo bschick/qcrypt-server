@@ -26,11 +26,11 @@ import {
 import { type EntityItem, type EntityRecord } from 'electrodb';
 type UnverifiedUserItem = EntityItem<typeof Users>;
 type VerifiedUserItem = EntityRecord<typeof Users> & {
-    lastCredentialId?: string;
-    recoveryIdEnc?: string;
+   lastCredentialId?: string;
+   recoveryIdEnc?: string;
 };
 
-type AuthItem = EntityItem<typeof Authenticators>; ;
+type AuthItem = EntityItem<typeof Authenticators>;;
 
 import {
    KMSClient,
@@ -45,7 +45,15 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { sign, verify, type JwtPayload } from 'jsonwebtoken';
-import sanitizeHtml from 'sanitize-html';
+import { FilterXSS } from 'xss';
+
+const sanitize = new FilterXSS({
+   // remove rather than escape stuff
+   stripIgnoreTag: true,
+   escapeHtml: (html: string) => {
+      return html.replace(/</g, "").replace(/>/g, "");
+   }
+});
 
 type QParams = {
    [key: string]: string;
@@ -149,9 +157,9 @@ function checkVerified(unverifiedUser: UnverifiedUserItem, userId?: string): Ver
 
 async function encryptField(
    field: Uint8Array,
-   context: {[key: string]: string}
-) : Promise<string> {
-   if(!KMS_KEYID) {
+   context: { [key: string]: string }
+): Promise<string> {
+   if (!KMS_KEYID) {
       throw new Error('missing kms keyid')
    }
 
@@ -172,14 +180,14 @@ async function encryptField(
 
 async function decryptField(
    fieldEnc: string,
-   context: {[key: string]: string},
+   context: { [key: string]: string },
    exptectedBytes: number
-) : Promise<Uint8Array> {
-   if(!KMS_KEYID) {
+): Promise<Uint8Array> {
+   if (!KMS_KEYID) {
       throw new Error('missing kms keyid')
    }
 
-   const fieldEncBytes =  base64UrlDecode(fieldEnc);
+   const fieldEncBytes = base64UrlDecode(fieldEnc);
    const dec = new DecryptCommand({
       CiphertextBlob: fieldEncBytes,
       KeyId: KMS_KEYID,
@@ -187,7 +195,7 @@ async function decryptField(
    });
 
    const result = await kmsClient.send(dec);
-   if(!result.Plaintext || result.Plaintext.byteLength != exptectedBytes) {
+   if (!result.Plaintext || result.Plaintext.byteLength != exptectedBytes) {
       throw new Error('field decryption failed, context:', context);
    }
 
@@ -208,7 +216,7 @@ async function setupJwtMaterial(): Promise<Uint8Array> {
       );
 
       return encodedMaterial;
-   } catch(error) {
+   } catch (error) {
       console.error("auth setup errror", error);
       throw new Error('auth setup error');
    }
@@ -251,7 +259,7 @@ async function verifySession(
 
    // do not start new session because auth was not provided
    const responseBody = await makeLoginUserInfoResponse(verifiedUser, true, false);
-   return { body: JSON.stringify(responseBody)};
+   return { body: JSON.stringify(responseBody) };
 }
 
 
@@ -292,7 +300,7 @@ async function verifyAuthentication(
       challenge: body.challenge
    }).go();
 
-   if ( (Date.now() / 1000) > challenge.data.expiresAt) {
+   if ((Date.now() / 1000) > challenge.data.expiresAt) {
       throw new AuthError('authentication timeout, try again');
    }
 
@@ -355,9 +363,9 @@ async function verifyAuthentication(
       verifiedUser.lastCredentialId = authenticator.data.credentialId;
 
       if (body.includerecovery &&
-          (!verifiedUser.recoveryIdEnc || verifiedUser.recoveryIdEnc.length == 0)) {
+         (!verifiedUser.recoveryIdEnc || verifiedUser.recoveryIdEnc.length == 0)) {
          const rand = new GenerateRandomCommand({
-               NumberOfBytes: RECOVERYID_BYTES
+            NumberOfBytes: RECOVERYID_BYTES
          });
          const result = await kmsClient.send(rand);
          const recoveryId = result.Plaintext;
@@ -430,7 +438,7 @@ async function verifyRegistration(
    }).go();
 
    // Must use the last challenged within 1 minute or its rejected
-   if ( (Date.now() / 1000) > challenge.data.expiresAt) {
+   if ((Date.now() / 1000) > challenge.data.expiresAt) {
       throw new AuthError('verification timeout, try again');
    }
 
@@ -504,13 +512,13 @@ async function verifyRegistration(
       }
 
       const rparams = {
-            NumberOfBytes: USERCRED_BYTES + RECOVERYID_BYTES
+         NumberOfBytes: USERCRED_BYTES + RECOVERYID_BYTES
       };
       const rand = new GenerateRandomCommand(rparams);
       const result = await kmsClient.send(rand);
 
       const randData = result.Plaintext;
-      if (!randData || randData.byteLength != rparams.NumberOfBytes ) {
+      if (!randData || randData.byteLength != rparams.NumberOfBytes) {
          throw new Error("GenerateRandomCommand failure");
       }
 
@@ -520,7 +528,7 @@ async function verifyRegistration(
       // a new authenticator for an existing user, it will have a userCred already
       if (!unverifiedUser.verified) {
          // Don't ever overwrite userCred, due to a bug or somethign
-         if(unverifiedUser.userCred) {
+         if (unverifiedUser.userCred) {
             throw new Error('unexpected userCred');
          }
 
@@ -533,12 +541,13 @@ async function verifyRegistration(
 
          // for temporary backward compat, don't add for old client versions that don't sent this
          let recoveryIdEnc: string | undefined;
-         if(body.includerecovery) {
+         if (body.includerecovery) {
             const recoveryId = randData.slice(USERCRED_BYTES);
             recoveryIdEnc = await encryptField(
                recoveryId,
                { userId: unverifiedUser.userId }
-         );}
+            );
+         }
 
          await Users.patch({
             userId: unverifiedUser.userId,
@@ -681,7 +690,8 @@ async function registrationOptions(
       if (!params.username) {
          throw new ParamError('must provide username or userid');
       }
-      const userName = sanitizeHtml(params.username);
+
+      const userName = sanitize.process(params.username);
       if (userName.length < 6 || userName.length > 31) {
          throw new ParamError('username must greater than 5 and less than 32 character');
       }
@@ -693,13 +703,13 @@ async function registrationOptions(
       // Reduce round-trips by getting enough data for 3 x 16 bytes ID tries
       // and 1 x 32 bytes userCred
       const rparams = {
-            NumberOfBytes: RETRIES * USERID_BYTES + USERCRED_BYTES + RECOVERYID_BYTES
+         NumberOfBytes: RETRIES * USERID_BYTES + USERCRED_BYTES + RECOVERYID_BYTES
       };
       const rand = new GenerateRandomCommand(rparams);
       const result = await kmsClient.send(rand);
 
       const randData = result.Plaintext;
-      if (!randData || randData.byteLength != rparams.NumberOfBytes ) {
+      if (!randData || randData.byteLength != rparams.NumberOfBytes) {
          throw new Error("GenerateRandomCommand failure");
       }
 
@@ -790,13 +800,13 @@ async function makeLoginUserInfoResponse(
    includeUserCred: boolean = true,  // for client backwords compat
    includeRecovery: boolean = false, // for client backwords compat
    auths?: AuthenticatorInfo[]
-) : Promise<LoginUserInfo> {
+): Promise<LoginUserInfo> {
 
    const userInfo = await makeUserInfoResponse(verifiedUser, auths);
 
    try {
       let userCred: Uint8Array | undefined;
-      if (includeUserCred){
+      if (includeUserCred) {
          userCred = await decryptField(
             verifiedUser.userCredEnc,
             { userId: verifiedUser.userId },
@@ -805,7 +815,7 @@ async function makeLoginUserInfoResponse(
       }
 
       let recoveryId: Uint8Array | undefined;
-      if(includeRecovery && verifiedUser.recoveryIdEnc) {
+      if (includeRecovery && verifiedUser.recoveryIdEnc) {
          recoveryId = await decryptField(
             verifiedUser.recoveryIdEnc,
             { userId: verifiedUser.userId },
@@ -820,7 +830,7 @@ async function makeLoginUserInfoResponse(
          pkId: verifiedUser.lastCredentialId
       };
 
-   } catch(error) {
+   } catch (error) {
       console.error("auth setup errror", error);
       throw new AuthError('auth setup error');
    }
@@ -830,7 +840,7 @@ async function makeLoginUserInfoResponse(
 async function makeUserInfoResponse(
    verifiedUser: VerifiedUserItem,
    auths?: AuthenticatorInfo[]
-) : Promise<UserInfo> {
+): Promise<UserInfo> {
 
    auths = auths ?? await loadAuthenticators(verifiedUser);
 
@@ -859,7 +869,8 @@ async function putDescription(
    if (!verifiedUser) {
       throw new ParamError('user not found')
    }
-   const description = sanitizeHtml(body);
+
+   const description = sanitize.process(body);
    if (!description) {
       throw new ParamError('missing description');
    }
@@ -904,7 +915,8 @@ async function putUserName(
    if (!verifiedUser) {
       throw new ParamError('user not found')
    }
-   const userName = sanitizeHtml(body);
+
+   const userName = sanitize.process(body);
    if (!userName) {
       throw new ParamError('missing username');
    }
@@ -1171,8 +1183,8 @@ async function recover2(
       throw new ParamError('missing recovery id');
    }
    if (!unverifiedUser.recoveryIdEnc ||
-        unverifiedUser.recoveryIdEnc.length < 10 ||
-       !unverifiedUser.verified) {
+      unverifiedUser.recoveryIdEnc.length < 10 ||
+      !unverifiedUser.verified) {
       throw new ParamError('invalid recovery id'); // vague on purpose
    }
 
@@ -1499,8 +1511,8 @@ async function patch(
 }
 
 // User may be verified or unverified
-async function getJwtKey(user: UnverifiedUserItem) : Promise<Buffer> {
-   if(!jwtMaterial) {
+async function getJwtKey(user: UnverifiedUserItem): Promise<Buffer> {
+   if (!jwtMaterial) {
       jwtMaterial = await setupJwtMaterial();
    }
 
@@ -1526,10 +1538,10 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
    const token = sign(
       payload,
       jwtKey, {
-         algorithm:'HS512',
-         expiresIn: 21600,
-         issuer: 'quickcrypt'
-      }
+      algorithm: 'HS512',
+      expiresIn: 21600,
+      issuer: 'quickcrypt'
+   }
    );
 
    return `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=21600`
@@ -1549,20 +1561,20 @@ async function verifyCookie(unverifiedUser: UnverifiedUserItem, cookie: string):
       payload = verify(
          token,
          jwtKey, {
-            algorithms:['HS512'],
-            issuer: 'quickcrypt'
-         }
+         algorithms: ['HS512'],
+         issuer: 'quickcrypt'
+      }
       ) as JwtPayload;
 
-   } catch(err) {
+   } catch (err) {
       console.error(err);
       throw new AuthError('authentication error');
    }
 
-   if(!payload ||
+   if (!payload ||
       !payload.pkId ||
-       payload.pkId !== unverifiedUser.lastCredentialId ||
-       payload.iss !== 'quickcrypt'
+      payload.pkId !== unverifiedUser.lastCredentialId ||
+      payload.iss !== 'quickcrypt'
    ) {
       throw new AuthError('authentication error');
    }
@@ -1581,7 +1593,7 @@ function makeResponse(body: string, status: number, cookie?: string): any {
       body: body
    };
 
-   if(cookie) {
+   if (cookie) {
       resp.headers["Set-Cookie"] = cookie;
    }
 
@@ -1639,8 +1651,8 @@ async function handler(event: any, context: any) {
    try {
       let verifiedUser: VerifiedUserItem | undefined;
 
-      if(authorize) {
-         if(!reqCookie) {
+      if (authorize) {
+         if (!reqCookie) {
             throw new AuthError('not authorized');
          }
          const unverifiedUser = await getUnverifiedUser(params.userid);
