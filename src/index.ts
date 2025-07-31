@@ -609,7 +609,7 @@ async function verifyRegistration(
 }
 
 
-async function authenticationOptions(
+async function getAuthenticationOptions(
    rpID: string,
    rpOrigin: string,
    params: QParams,
@@ -681,7 +681,7 @@ async function registrationOptions(
    if (params.userid) {
       // means this is a known user who is creating a new credential cannot
       // specify a new username
-      if (params.username) {
+      if (body) {
          throw new ParamError('cannot specify username for existing user');
       }
 
@@ -689,11 +689,11 @@ async function registrationOptions(
 
    } else {
       // Totally new users, must provide a username
-      if (!params.username) {
+      if (!body) {
          throw new ParamError('must provide username or userid');
       }
 
-      const userName = sanitize.process(params.username);
+      const userName = sanitize.process(body);
       if (userName.length < 6 || userName.length > 31) {
          throw new ParamError('username must greater than 5 and less than 32 character');
       }
@@ -783,6 +783,16 @@ async function registrationOptions(
    }
 };
 
+
+// For backward compat only. Remove after new version is out
+async function getRegistrationOptions(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   body: string
+): Promise<Response> {
+   return registrationOptions(rpID, rpOrigin, params, params.username);
+}
 
 async function makeLoginUserInfoResponse(
    verifiedUser: VerifiedUserItem,
@@ -1678,8 +1688,8 @@ const FUNCTIONS: {
    [key: string]: { [key: string]: [(r: string, o: string, p: QParams, b: string, u?: VerifiedUserItem) => Promise<Response>, boolean] }
 } = {
    GET: {
-      regoptions: [registrationOptions, false],
-      authoptions: [authenticationOptions, false],
+      regoptions: [getRegistrationOptions, false], // for backward compat, remove
+      authoptions: [getAuthenticationOptions, false],
       authenticators: [getAuthenticators, true],
       userinfo: [getUserInfo, true]
    },
@@ -1688,6 +1698,7 @@ const FUNCTIONS: {
       username: [putUserName, true],
    },
    POST: {
+      regoptions: [registrationOptions, false],
       verifysess: [verifySession, true],
       verifyreg: [verifyRegistration, false],
       verifyauth: [verifyAuthentication, false],
