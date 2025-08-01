@@ -62,6 +62,7 @@ type QParams = {
 type Response = {
    body: string;
    startSession?: VerifiedUserItem;
+   endSession?: boolean;
 };
 
 type AuthenticatorInfo = {
@@ -262,6 +263,31 @@ async function verifySession(
    // do not start new session because auth was not provided
    const responseBody = await makeLoginUserInfoResponse(verifiedUser, true, false);
    return { body: JSON.stringify(responseBody) };
+}
+
+
+async function endSession(
+   rpID: string,
+   rpOrigin: string,
+   params: QParams,
+   bodyStr: string,
+   verifiedUser?: VerifiedUserItem
+): Promise<Response> {
+
+   if (!verifiedUser) {
+      throw new ParamError('user not found')
+   }
+
+   await Users.patch({
+      userId: verifiedUser.userId,
+   }).set({
+      lastCredentialId: ''
+   }).go();
+
+   return {
+      body: JSON.stringify("bye"),
+      endSession: true
+   };
 }
 
 
@@ -565,6 +591,17 @@ async function verifyRegistration(
          unverifiedUser.userCred = userCredB64;
          unverifiedUser.userCredEnc = userCredEnc;
          unverifiedUser.recoveryIdEnc = recoveryIdEnc;
+         unverifiedUser.lastCredentialId = auth.data.credentialId;
+
+      } else if (!unverifiedUser.lastCredentialId || unverifiedUser.lastCredentialId.length === 0) {
+         // This occurs after account recovery because all Passkeys are wiped.
+         // During normal credential addition, lastCredentialId isn't changed
+         await Users.patch({
+            userId: unverifiedUser.userId,
+         }).set({
+            lastCredentialId: auth.data.credentialId
+         }).go();
+
          unverifiedUser.lastCredentialId = auth.data.credentialId;
       }
 
@@ -1147,6 +1184,7 @@ async function recover(
       userId: verifiedUser.userId
    }).set({
       recovered: rcount,
+      lastCredentialId: ''
    }).go();
 
    // log but continue...
@@ -1222,6 +1260,7 @@ async function recover2(
       userId: verifiedUser.userId
    }).set({
       recovered: rcount,
+      lastCredentialId: ''
    }).go();
 
    // log but continue...
@@ -1528,6 +1567,10 @@ async function getJwtKey(user: UnverifiedUserItem): Promise<Buffer> {
    ));
 }
 
+function killCookie(): string {
+   return '__Host-JWT=X; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=0';
+}
+
 async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
    const jwtKey = await getJwtKey(verifiedUser);
    const payload = {
@@ -1538,12 +1581,12 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
       payload,
       jwtKey, {
          algorithm: 'HS512',
-         expiresIn: 21600,
+         expiresIn: 10800,
          issuer: 'quickcrypt'
       }
    );
 
-   return `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=21600`
+   return `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=10800`
 }
 
 async function verifyCookie(
@@ -1552,7 +1595,7 @@ async function verifyCookie(
 ): Promise<VerifiedUserItem> {
 
    const [name, token] = cookie.split('=');
-   if (name !== '__Host-JWT' || token === undefined) {
+   if (name !== '__Host-JWT' || token === undefined || token.length < 10) {
       throw new AuthError('authentication error');
    }
 
@@ -1650,27 +1693,29 @@ async function handler(event: any, context: any) {
    const params: QParams = event.queryStringParameters ?? {};
 
    try {
+      console.log(`calling function for: ${method} ${resource} authorize: ${authorize}`);
+      console.log(`rpID: ${rpID} rpOrigin: ${rpOrigin}`);
+      // Uncomment for debugging
+      //      console.log('params: ' + JSON.stringify(params));
+      //      console.log('body: ' + body);
+      //      console.log(`user: ${verifiedUser}`);
+
       let verifiedUser: VerifiedUserItem | undefined;
 
       if (authorize) {
-         if (!reqCookie) {
+         if (!reqCookie || !params.userid) {
             throw new AuthError('not authorized');
          }
          const unverifiedUser = await getUnverifiedUser(params.userid);
          verifiedUser = await verifyCookie(unverifiedUser, reqCookie);
       }
 
-      console.log('calling function for: ' + method + ' ' + resource);
-      console.log('rpID: ' + rpID + ' rpOrigin: ' + rpOrigin);
-      // Uncomment for debugging
-      //      console.log('params: ' + JSON.stringify(params));
-      //      console.log('body: ' + body);
-      //      console.log(`user: ${verifiedUser}`);
-
       const response = await func(rpID, rpOrigin, params, body, verifiedUser);
       let respCookie: string | undefined;
       if (response.startSession) {
          respCookie = await createCookie(response.startSession);
+      } else if(response.endSession) {
+         respCookie = killCookie();
       }
       return makeResponse(response.body, 200, respCookie);
    } catch (err) {
@@ -1701,9 +1746,10 @@ const FUNCTIONS: {
    },
    POST: {
       regoptions: [registrationOptions, false],
-      verifysess: [verifySession, true],
       verifyreg: [verifyRegistration, false],
       verifyauth: [verifyAuthentication, false],
+      verifysess: [verifySession, true],
+      endsess: [endSession, true],
       recover: [recover, false],
       recover2: [recover2, false],
       loadaaguids: [loadAAGUIDs, false], // for internal use, don't add to cloudfront
