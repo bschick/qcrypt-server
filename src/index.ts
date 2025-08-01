@@ -726,11 +726,10 @@ async function registrationOptions(
 
    } else {
       // Totally new user, must provide a username
-      if (!body) {
+      const userName = sanitize.process(body);
+      if (!userName) {
          throw new ParamError('must provide username or userid');
       }
-
-      const userName = sanitize.process(body);
       if (userName.length < 6 || userName.length > 31) {
          throw new ParamError('username must greater than 5 and less than 32 character');
       }
