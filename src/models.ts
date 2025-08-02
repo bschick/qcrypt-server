@@ -49,6 +49,11 @@ export const Users = new Entity(
             default: () => 0,
             required: true
          },
+         authCount: {
+            type: "number",
+            default: () => 0,
+            required: true
+         },
          createdAt: {
             type: "number",
             default: () => Date.now(),

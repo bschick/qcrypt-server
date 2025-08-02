@@ -385,10 +385,12 @@ async function verifyAuthentication(
       await Users.patch({
          userId: verifiedUser.userId,
       }).set({
-         lastCredentialId: authenticator.data.credentialId
+         lastCredentialId: authenticator.data.credentialId,
+         authCount: verifiedUser.authCount + 1
       }).go();
 
       verifiedUser.lastCredentialId = authenticator.data.credentialId;
+      verifiedUser.authCount += 1;
 
       if (body.includerecovery &&
          (!verifiedUser.recoveryIdEnc || verifiedUser.recoveryIdEnc.length == 0)) {
@@ -555,7 +557,7 @@ async function verifyRegistration(
       // If this is a new user reg, verified is false and the user will not have
       // a userCred or recoveryId
       if (!unverifiedUser.verified) {
-         // Don't ever overwrite userCred (due to a bug or whatever)
+         // Careful to never overwrite userCredEnc (due to a bug or whatever)
          if (unverifiedUser.userCred || unverifiedUser.userCredEnc || unverifiedUser.recoveryIdEnc) {
             throw new Error('unexpected user credential or recovery id');
          }
@@ -584,7 +586,8 @@ async function verifyRegistration(
             userCred: userCredB64,
             userCredEnc: userCredEnc,
             recoveryIdEnc: recoveryIdEnc,
-            lastCredentialId: auth.data.credentialId
+            lastCredentialId: auth.data.credentialId,
+            authCount: 1
          }).go();
 
          unverifiedUser.verified = true;
@@ -592,6 +595,7 @@ async function verifyRegistration(
          unverifiedUser.userCredEnc = userCredEnc;
          unverifiedUser.recoveryIdEnc = recoveryIdEnc;
          unverifiedUser.lastCredentialId = auth.data.credentialId;
+         unverifiedUser.authCount = 1;
 
       } else if (!unverifiedUser.lastCredentialId || unverifiedUser.lastCredentialId.length === 0) {
          // This occurs after account recovery because all Passkeys are wiped.
@@ -599,10 +603,13 @@ async function verifyRegistration(
          await Users.patch({
             userId: unverifiedUser.userId,
          }).set({
-            lastCredentialId: auth.data.credentialId
+            lastCredentialId: auth.data.credentialId,
+            authCount: unverifiedUser.authCount + 1
+
          }).go();
 
          unverifiedUser.lastCredentialId = auth.data.credentialId;
+         unverifiedUser.authCount += 1;
       }
 
       // should now be verified
@@ -1506,7 +1513,7 @@ async function patch(
 
    //       const userCredBytes = base64Decode(user.userCred);
    //       const enc = new EncryptCommand({
-   //          Plaintext: userCredBytes,
+   //          Plaintext: userCredBytes ?? new Uint8Array([0]),
    //          KeyId: KMS_KEYID,
    //          EncryptionContext: {
    //             userId: user.userId
@@ -1561,7 +1568,7 @@ async function getJwtKey(user: UnverifiedUserItem): Promise<Buffer> {
       'sha512',
       combined,
       salt,
-      "jwt_key",
+      "jwt_key" + user.authCount,
       32
    ));
 }
