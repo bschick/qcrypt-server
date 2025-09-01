@@ -709,7 +709,6 @@ async function getAuthenticationOptions(
    }
 }
 
-
 async function passkeyRegistration(
    rpID: string,
    rpOrigin: string,
@@ -799,6 +798,92 @@ async function userRegistration(
 
    return registrationOptions(rpID, created.data);
 }
+
+
+async function registrationOptionsOld(
+   rpID: string,
+   rpOrigin: string,
+   resourceId: string | undefined,
+   params: QParams,
+   body: string
+): Promise<Response> {
+
+   let unverifiedUser: UnverifiedUserItem;
+
+   if (params.userid) {
+      // means this is a known user who is creating a new credential cannot
+      // specify a new username
+      if (body) {
+         throw new ParamError('cannot specify username for existing user');
+      }
+
+      unverifiedUser = await getUnverifiedUser(params.userid);
+
+   } else {
+      // Totally new user, must provide a username
+      const userName = sanitize.process(body);
+      if (!userName) {
+         throw new ParamError('must provide username or userid');
+      }
+      if (userName.length < 6 || userName.length > 31) {
+         throw new ParamError('username must greater than 5 and less than 32 character');
+      }
+
+      let uId: string | undefined;
+
+      const RETRIES = 3;
+
+      // Reduce round-trips by getting enough data for 3 x 16 bytes ID tries
+      // and 1 x 32 bytes userCred
+      const rparams = {
+         NumberOfBytes: RETRIES * USERID_BYTES
+      };
+      const rand = new GenerateRandomCommand(rparams);
+      const result = await kmsClient.send(rand);
+
+      const randData = result.Plaintext;
+      if (!randData || randData.byteLength != rparams.NumberOfBytes) {
+         throw new Error("GenerateRandomCommand failure");
+      }
+
+      // Loop in the very unlikley event that we randomly pick
+      // a duplicate (out of 3.4e38 possible)
+      for (let i = 0; i < RETRIES; ++i) {
+         const uIdBytes = randData.slice(i * USERID_BYTES, (i + 1) * USERID_BYTES);
+         uId = base64UrlEncode(uIdBytes)!;
+
+         const users = await Users.query.byUserId({
+            userId: uId
+         }).go({ attributes: ['userId'] });
+
+         if (!users || users.data.length == 0) {
+            break;
+         } else {
+            uId = undefined;
+         }
+      }
+
+      if (!uId) {
+         throw new Error('could not allocate userId');
+      }
+
+      const created = await Users.create({
+         userId: uId,
+         userName: userName,
+         userCred: undefined,
+         userCredEnc: undefined,
+         recoveryIdEnc: undefined
+      }).go();
+
+      if (!created || !created.data) {
+         throw new ParamError('user not created or found')
+      }
+
+      unverifiedUser = created.data;
+   }
+
+   return registrationOptions(rpID, unverifiedUser);
+};
 
 
 async function registrationOptions(
@@ -1806,6 +1891,7 @@ const FUNCTIONS: {
       username: [putUserName, true],
    },
    POST: {
+      regoptions: [registrationOptionsOld, false], // remove after backword compat time
       userreg: [userRegistration, false],
       passkeyreg: [passkeyRegistration, true],
       verifyreg: [verifyRegistration, false],
