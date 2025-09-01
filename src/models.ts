@@ -66,13 +66,14 @@ export const Users = new Entity(
             pk: {
                field: "pk",
                cast: "string",
-               composite: ["userId"]
+               composite: ["userId"],
+               casing: 'none'
             }
          },
       }
    },
    {
-      table: "QuickCryptUsers",
+      table: "Users",
       client: client
    }
 );
@@ -147,12 +148,14 @@ export const Authenticators = new Entity(
             pk: {
                field: "pk",
                cast: "string",
-               composite: ["userId"]
+               composite: ["userId"],
+               casing: 'none'
             },
             sk: {
                field: "sk",
                cast: "string",
-               composite: ["credentialId"]
+               composite: ["credentialId"],
+               casing: 'none'
             }
          },
 /*         byCredId: {
@@ -165,7 +168,7 @@ export const Authenticators = new Entity(
       }
    },
    {
-      table: "QuickCryptAuthenticators",
+      table: "Authenticators",
       client: client
    }
 );
@@ -196,52 +199,18 @@ export const Challenges = new Entity(
             pk: {
                field: "pk",
                cast: "string",
-               composite: ["challenge"]
+               composite: ["challenge"],
+               casing: 'none'
             }
          }
       }
    },
    {
-      table: "QuickCryptChallenges",
+      table: "Challenges",
       client: client
    }
 );
 
-
-export const Validators = new Entity(
-   {
-      model: {
-         entity: "validator",
-         version: "1",
-         service: "quickcrypt"
-      },
-      attributes: {
-         hash: {
-            type: "string",
-            required: true
-         },
-         createdAt: {
-            type: "number",
-            default: () => Date.now(),
-            // should not be modified after created
-            readOnly: true
-         }
-      },
-      indexes: {
-         byValidator: {
-            pk: {
-               field: "pk",
-               cast: "string",
-               composite: ["hash"]
-            }
-         }
-      }
-   },
-   {
-      table: "QuickCryptValidators",
-      client: client
-   }
-);
 
 export const AuthEvents = new Entity(
    {
@@ -275,7 +244,8 @@ export const AuthEvents = new Entity(
             pk: {
                field: "pk",
                cast: "string",
-               composite: ["userId"]
+               composite: ["userId"],
+               casing: 'none'
             },
             sk: {
                field: "sk",
@@ -286,7 +256,7 @@ export const AuthEvents = new Entity(
       }
    },
    {
-      table: "QuickCryptEvents",
+      table: "Events",
       client: client
    }
 );
@@ -321,13 +291,14 @@ export const AAGUIDs = new Entity(
             pk: {
                field: "pk",
                cast: "string",
-               composite: ["aaguid"]
+               composite: ["aaguid"],
+               casing: 'none'
             }
          }
       }
    },
    {
-      table: "QuickCryptAAGUIDs",
+      table: "AAGUIDs",
       client: client
    }
 );
