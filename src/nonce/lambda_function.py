@@ -5,7 +5,6 @@ import hashlib
 from selectolax.parser import HTMLParser
 from secrets import token_bytes
 from botocore.exceptions import ClientError
-#import json
 
 
 logger = logging.getLogger(__name__)
@@ -120,24 +119,3 @@ def update_hashes(tree, tag):
             hashes.add(element.attributes['integrity'])
 
     return hashes
-
-
-#    if stashed:
-#        nonce = token_bytes(16)
-#        b64nonce = standard_b64encode(nonce).decode('utf8')
-#        body = stashed.replace(old_nonce, b64nonce)
-#        csp = csp_base.replace(old_nonce, b64nonce)
-#
-#        return {
-#            'statusCode': 200,
-#            'headers': {
-#                "content-type": "text/html",
-#                'Content-Security-Policy': csp,
-#            },
-#            'body':body,
-#        }
-#    else:
-#        return {
-#            'statusCode': response['ResponseMetadata']['HTTPStatusCode'] if response else 500,
-#            'body': json.dumps('cloud not load content from s3')
-#        }
