@@ -36,7 +36,7 @@ import { hkdfSync } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
-import { sign, verify, type JwtPayload } from 'jsonwebtoken';
+import { sign, verify, decode, type JwtPayload } from 'jsonwebtoken';
 import { FilterXSS } from 'xss';
 
 type UnverifiedUserItem = EntityItem<typeof Users>;
@@ -565,8 +565,8 @@ async function verifyRegistration(
          throw new Error("GenerateRandomCommand failure");
       }
 
-      // For both backward compat and to reduces calls to KMS whe user creation
-      // is abandonded, delay creation for userCred and recoveryId until now.
+      // For both backward compat and to reduces calls to KMS when user creation
+      // is abandonded, delay creation for userCred and recoveryId until this point.
       // If this is a new user reg, verified is false and the user will not have
       // a userCred or recoveryId
       if (!unverifiedUser.verified) {
@@ -582,15 +582,11 @@ async function verifyRegistration(
             { userId: unverifiedUser.userId }
          );
 
-         // for temporary backward compat, don't add for old client versions that don't sent this
-         let recoveryIdEnc: string | undefined;
-         if (body.includerecovery) {
-            const recoveryId = randData.slice(USERCRED_BYTES);
-            recoveryIdEnc = await encryptField(
-               recoveryId,
-               { userId: unverifiedUser.userId }
-            );
-         }
+         const recoveryId = randData.slice(USERCRED_BYTES);
+         const recoveryIdEnc = await encryptField(
+            recoveryId,
+            { userId: unverifiedUser.userId }
+         );
 
          await Users.patch({
             userId: unverifiedUser.userId,
@@ -799,7 +795,7 @@ async function userRegistration(
    return registrationOptions(rpID, created.data);
 }
 
-
+ // remove after backward compat, delete entire function later
 async function registrationOptionsOld(
    rpID: string,
    rpOrigin: string,
@@ -924,8 +920,8 @@ async function registrationOptions(
 
 async function makeLoginUserInfoResponse(
    verifiedUser: VerifiedUserItem,
-   includeUserCred: boolean = true,  // for client backwords compat
-   includeRecovery: boolean = false, // for client backwords compat
+   includeUserCred: boolean,
+   includeRecovery: boolean,
    auths?: AuthenticatorInfo[]
 ): Promise<LoginUserInfo> {
 
@@ -1006,8 +1002,7 @@ async function putDescription(
       throw new ParamError('description must more than 5 and less than 43 character');
    }
 
-   // For backword compat, change to just resourceId after new version
-   const credId = resourceId ?? params.credid;
+   const credId = resourceId;
    if (!credId) {
       throw new ParamError('missing credential id');
    }
@@ -1179,8 +1174,7 @@ async function deleteAuthenticator(
    if (!verifiedUser) {
       throw new ParamError('user not found')
    }
-   // For backword compat, change to just resourceId after new version
-   const credId = resourceId ?? params.credid;
+   const credId = resourceId;
    if (!credId) {
       throw new ParamError('missing credential id');
    }
@@ -1232,8 +1226,7 @@ async function recover(
    body: string
 ): Promise<Response> {
 
-   // for backword compat, remove after new client version
-   const userCred = resourceId ?? params.usercred;
+   const userCred = resourceId;
 
    if (!userCred || userCred.length < 10) {
       throw new ParamError('missing user credential');
@@ -1304,8 +1297,7 @@ async function recover2(
 
    const unverifiedUser = await getUnverifiedUser(params.userid);
 
-   // for backword compat, remove after new client version
-   const recoveryId = resourceId ?? params.recoveryId;
+   const recoveryId = resourceId;
 
    if (!recoveryId || recoveryId.length < 10) {
       throw new ParamError('missing recovery id');
@@ -1720,6 +1712,9 @@ async function verifyCookie(
    const jwtKey = await getJwtKey(unverifiedUser);
    let payload: JwtPayload;
 
+// payload = decode(token, {json: true})!;
+// console.log(payload);
+
    try {
       payload = verify(
          token,
@@ -1759,7 +1754,7 @@ function makeResponse(body: string, status: number, cookie?: string): any {
       resp.headers["Set-Cookie"] = cookie;
    }
 
-   console.log(`status: ${status} ${status != 200 ? body : ''}`);
+   console.log(`status: ${status} cookie: ${Boolean(cookie)} ${status != 200 ? 'error: ' + body : ''}`);
    return resp;
 }
 
@@ -1835,9 +1830,6 @@ async function handler(event: any, context: any) {
 
    const params: QParams = event.queryStringParameters ?? {};
 
-   // For backward compate, remove on client upgrade
-   userId = userId ?? params.userid;
-
    try {
       console.log(`calling function for: ${method} ${resource} authorize: ${authorize}`);
       console.log(`rpID: ${rpID} rpOrigin: ${rpOrigin}`);
@@ -1891,7 +1883,7 @@ const FUNCTIONS: {
       username: [putUserName, true],
    },
    POST: {
-      regoptions: [registrationOptionsOld, false], // remove after backword compat time
+      regoptions: [registrationOptionsOld, false], // remove after backward compat
       userreg: [userRegistration, false],
       passkeyreg: [passkeyRegistration, true],
       verifyreg: [verifyRegistration, false],
