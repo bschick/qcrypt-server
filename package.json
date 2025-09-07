@@ -1,5 +1,5 @@
 {
-  "name": "qcrypt-server",
+  "name": "@qcrypt/qcrypt-server",
   "version": "2.0.0",
   "description": "Backend authentication servers for quick crypt",
   "main": "index.ts",
