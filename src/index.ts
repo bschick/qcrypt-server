@@ -1789,7 +1789,7 @@ async function handler(event: any, context: any) {
          offset += 2;
       }
 
-      resource = sanitizeXSS(parts[offset]);
+      resource = parts[offset];
       resourceId = parts[offset + 1];
    } catch (err) {
       console.error(err);
