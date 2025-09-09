@@ -80,7 +80,7 @@ def lambda_handler(event, context):
     else:
         return {
             'statusCode': response['ResponseMetadata']['HTTPStatusCode'] if response else 500,
-            'body': 'cloud not load content from s3'
+            'body': 'could not load content from s3'
         }
 
 

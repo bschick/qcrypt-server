@@ -37,7 +37,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { sign, verify, decode, type JwtPayload } from 'jsonwebtoken';
-import { FilterXSS } from 'xss';
+import { sanitizeXSS, validB64 } from './utils';
 
 type UnverifiedUserItem = EntityItem<typeof Users>;
 type VerifiedUserItem = EntityRecord<typeof Users> & {
@@ -58,15 +58,6 @@ type HttpHandler = (
    bodyStr: string,
    verifiedUser?: VerifiedUserItem
 ) => Promise<Response>
-
-const sanitize = new FilterXSS({
-   // remove rather than escape stuff
-   stripIgnoreTag: true,
-   escapeHtml: (html: string) => {
-      return html.replace(/</g, "").replace(/>/g, "");
-   }
-});
-
 
 type Response = {
    body: string;
@@ -102,7 +93,7 @@ enum EventNames {
    AuthOptions = 'AuthOptions',
    AuthVerify = 'AuthVerify',
    RegOptions = 'RegOptions',
-   RegVerfiy = 'RegVerfiy',
+   RegVerify = 'RegVerify',
    RegDelete = 'RegDelete',
    UserDelete = 'UserDelete',
    PutDescription = 'PutDescription',
@@ -149,17 +140,17 @@ function base64Decode(base64: string | undefined): Buffer | undefined {
 }
 
 
-function isVerified(unverifiedUser: UnverifiedUserItem, userId?: string): unverifiedUser is VerifiedUserItem {
+function isVerified(unverifiedUser: UnverifiedUserItem, userId: string): unverifiedUser is VerifiedUserItem {
    return unverifiedUser.verified &&
-      unverifiedUser.userId !== undefined && unverifiedUser.userId.length > 0 &&
+      unverifiedUser.userId === userId &&
+      validB64(unverifiedUser.userId) &&
+      validB64(unverifiedUser.userCred) &&
+      validB64(unverifiedUser.userCredEnc) &&
       unverifiedUser.userName !== undefined && unverifiedUser.userName.length > 0 &&
-      unverifiedUser.userCred !== undefined && unverifiedUser.userCred.length > 0 &&
-      unverifiedUser.userCredEnc !== undefined && unverifiedUser.userCredEnc.length > 0 &&
-      unverifiedUser.createdAt !== undefined &&
-      unverifiedUser.userId === userId;
+      unverifiedUser.createdAt !== undefined;
 }
 
-function checkVerified(unverifiedUser: UnverifiedUserItem, userId?: string): VerifiedUserItem {
+function checkVerified(unverifiedUser: UnverifiedUserItem, userId: string): VerifiedUserItem {
    if (!isVerified(unverifiedUser, userId)) {
       throw new Error('user not verified');
    }
@@ -183,7 +174,7 @@ async function encryptField(
 
    const result = await kmsClient.send(enc);
    if (!result.CiphertextBlob) {
-      throw new Error('field encryption failed, context:', context);
+      throw new Error('field encryption failed');
    }
 
    return base64UrlEncode(result.CiphertextBlob)!;
@@ -193,7 +184,7 @@ async function encryptField(
 async function decryptField(
    fieldEnc: string,
    context: { [key: string]: string },
-   exptectedBytes: number
+   expectedBytes: number
 ): Promise<Uint8Array> {
    if (!KMS_KEYID) {
       throw new Error('missing kms keyid')
@@ -207,7 +198,7 @@ async function decryptField(
    });
 
    const result = await kmsClient.send(dec);
-   if (!result.Plaintext || result.Plaintext.byteLength != exptectedBytes) {
+   if (!result.Plaintext || result.Plaintext.byteLength != expectedBytes) {
       throw new Error('field decryption failed, context:', context);
    }
 
@@ -317,8 +308,8 @@ async function verifyAuthentication(
    if (!body.id) {
       throw new ParamError('missing authenticatorId');
    }
-   if (!body.challenge) {
-      throw new ParamError('missing challenge reply');
+   if (!validB64(body.challenge)) {
+      throw new ParamError('invalid challenge format');
    }
 
    const unverifiedUser = await getUnverifiedUser(body.response.userHandle!);
@@ -372,7 +363,7 @@ async function verifyAuthentication(
       });
    } catch (error) {
       console.error(error);
-      throw new AuthError('invalid authorizatoin');
+      throw new AuthError('invalid authorization');
    }
 
    // Should this be changed to throw and error if no verified?
@@ -459,8 +450,8 @@ async function verifyRegistration(
    if (!body.userId) {
       throw new ParamError('missing userId');
    }
-   if (!body.challenge) {
-      throw new ParamError('missing challenge reply');
+   if (!validB64(body.challenge)) {
+      throw new ParamError('invalid challenge format');
    }
 
    const unverifiedUser = await getUnverifiedUser(body.userId);
@@ -532,7 +523,7 @@ async function verifyRegistration(
          description = aaguidDetails.data.name ?? 'Passkey';
          description.slice(0, 42);
       } else {
-         console.error('aaguid ' + aaguid + ' not found');
+         console.error('aaguid not found:', JSON.stringify(aaguid));
       }
 
       // SimpleWebAuthen renamed these to WebAuthnCredential, now we have a missmatch
@@ -636,7 +627,7 @@ async function verifyRegistration(
    }
 
    // Let this happen async
-   recordEvent(EventNames.RegVerfiy, unverifiedUser.userId, verification.registrationInfo?.credential.id);
+   recordEvent(EventNames.RegVerify, unverifiedUser.userId, verification.registrationInfo?.credential.id);
 
    return {
       body: JSON.stringify(responseBody),
@@ -671,7 +662,7 @@ async function getAuthenticationOptions(
       }).go();
 
       // a user id without authenticator creds was never verified, so reject
-      if (!auths || auths.data.length == 0) {
+      if (!auths || auths.data.length === 0) {
          throw new ParamError('authenticator not found');
       }
 
@@ -734,7 +725,7 @@ async function userRegistration(
 ): Promise<Response> {
 
    // Totally new user, must provide a username
-   const userName = sanitize.process(bodyStr);
+   const userName = sanitizeXSS(bodyStr);
    if (!userName) {
       throw new ParamError('user name missing');
    }
@@ -817,7 +808,7 @@ async function registrationOptionsOld(
 
    } else {
       // Totally new user, must provide a username
-      const userName = sanitize.process(body);
+      const userName = sanitizeXSS(body);
       if (!userName) {
          throw new ParamError('must provide username or userid');
       }
@@ -994,7 +985,7 @@ async function putDescription(
       throw new ParamError('user not found')
    }
 
-   const description = sanitize.process(body);
+   const description = sanitizeXSS(body);
    if (!description) {
       throw new ParamError('missing description');
    }
@@ -1003,13 +994,13 @@ async function putDescription(
    }
 
    const credId = resourceId;
-   if (!credId) {
-      throw new ParamError('missing credential id');
+   if (!validB64(credId)) {
+      throw new ParamError('invalid credential id');
    }
 
    const patched = await Authenticators.patch({
       userId: verifiedUser.userId,
-      credentialId: credId
+      credentialId: credId!
    }).set({
       description: description
    }).go();
@@ -1043,7 +1034,7 @@ async function putUserName(
       throw new ParamError('user not found')
    }
 
-   const userName = sanitize.process(body);
+   const userName = sanitizeXSS(body);
    if (!userName) {
       throw new ParamError('missing username');
    }
@@ -1175,13 +1166,13 @@ async function deleteAuthenticator(
       throw new ParamError('user not found')
    }
    const credId = resourceId;
-   if (!credId) {
-      throw new ParamError('missing credential id');
+   if (!validB64(credId)) {
+      throw new ParamError('invalid credential id');
    }
 
    const deleted = await Authenticators.delete({
       userId: verifiedUser.userId,
-      credentialId: credId
+      credentialId: credId!
    }).go();
 
    if (!deleted || !deleted.data) {
@@ -1227,9 +1218,8 @@ async function recover(
 ): Promise<Response> {
 
    const userCred = resourceId;
-
-   if (!userCred || userCred.length < 10) {
-      throw new ParamError('missing user credential');
+   if (!validB64(userCred)) {
+      throw new ParamError('invalid user credential');
    }
 
    // Require an existing user for recovery
@@ -1298,10 +1288,10 @@ async function recover2(
    const unverifiedUser = await getUnverifiedUser(params.userid);
 
    const recoveryId = resourceId;
-
-   if (!recoveryId || recoveryId.length < 10) {
-      throw new ParamError('missing recovery id');
+   if (!validB64(recoveryId)) {
+      throw new ParamError('invalid recovery id');
    }
+
    if (!unverifiedUser.recoveryIdEnc ||
       unverifiedUser.recoveryIdEnc.length < 10 ||
       !unverifiedUser.verified) {
@@ -1368,8 +1358,8 @@ async function recover2(
 //
 async function getUnverifiedUser(userId: string): Promise<UnverifiedUserItem> {
 
-   if (!userId) {
-      throw new ParamError('missing userid');
+   if (!validB64(userId)) {
+      throw new ParamError('invalid userid');
    }
 
    // May not want to bring back all parameter (like recoveryIdEnc)
@@ -1552,7 +1542,7 @@ async function consistency(
                   userId: user.userId
                }).go({ attributes: ['credentialId'] });
 
-               if (!auths || auths.data.length == 0) {
+               if (!auths || auths.data.length === 0) {
                   console.error(`no credentials for user ${user.userId}, ${user.userName}`);
                   leaked += 1;
                   if( params['cleanse'] ){
@@ -1799,7 +1789,7 @@ async function handler(event: any, context: any) {
          offset += 2;
       }
 
-      resource = parts[offset];
+      resource = sanitizeXSS(parts[offset]);
       resourceId = parts[offset + 1];
    } catch (err) {
       console.error(err);
