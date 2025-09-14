@@ -52,12 +52,20 @@ type QParams = {
    [key: string]: string;
 };
 
-type HttpHandler = (
+type HttpDetails = {
+   method: string,
    rpID: string,
    rpOrigin: string,
-   resourceId: string | undefined,
+   resource: string,
+   resourceId?: string,
    params: QParams,
    body: Record<string, any>,
+   cookie?: string,
+   userId?: string
+};
+
+type HttpHandler = (
+   httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ) => Promise<Response>
 
@@ -251,11 +259,7 @@ async function recordEvent(
 }
 
 async function verifySession(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>,
+   httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
@@ -270,11 +274,7 @@ async function verifySession(
 
 
 async function endSession(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>,
+   httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
@@ -296,12 +296,14 @@ async function endSession(
 
 
 async function verifyAuthentication(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
+   const {
+      rpID,
+      rpOrigin,
+      params,
+      body,
+   } = httpDetails;
 
    if (!body.response || !body.response.userHandle) {
       throw new ParamError('missing userHandle');
@@ -445,12 +447,14 @@ async function verifyAuthentication(
 
 
 async function verifyRegistration(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
+   const {
+      rpID,
+      rpOrigin,
+      params,
+      body,
+   } = httpDetails;
 
    const unverifiedUser = await getUnverifiedUser(body.userId);
 
@@ -643,12 +647,12 @@ async function verifyRegistration(
 
 
 async function getAuthenticationOptions(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
+   const {
+      rpID,
+      params,
+   } = httpDetails;
 
    // If no userid is provided, then we don't return allowed creds and
    // the user is forced to pick one on their own. That happens when the user is
@@ -703,13 +707,12 @@ async function getAuthenticationOptions(
 }
 
 async function passkeyRegistration(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>,
+   httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
+   const {
+      rpID
+   } = httpDetails;
 
    if (!verifiedUser) {
       throw new ParamError('user not found')
@@ -720,12 +723,12 @@ async function passkeyRegistration(
 
 
 async function userRegistration(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
+   const {
+      rpID,
+      body,
+   } = httpDetails;
 
    // Totally new user, must provide a username
    // keep ?? body until clients update for backward compat
@@ -792,12 +795,13 @@ async function userRegistration(
 
 // remove after backward compat, delete entire function later
 async function registrationOptionsOld(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
+   const {
+      rpID,
+      params,
+      body,
+   } = httpDetails;
 
    let unverifiedUser: UnverifiedUserItem;
 
@@ -978,13 +982,13 @@ async function makeUserInfoResponse(
 
 
 async function putDescription(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>,
+   httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
+   const {
+      resourceId,
+      body,
+   } = httpDetails;
 
    if (!verifiedUser) {
       throw new ParamError('user not found')
@@ -1028,13 +1032,12 @@ async function putDescription(
 
 
 async function putUserName(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>,
+   httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
+   const {
+      body
+   } = httpDetails;
 
    if (!verifiedUser) {
       throw new ParamError('user not found')
@@ -1072,11 +1075,7 @@ async function putUserName(
 // Not tracking events for this method since they are frequent and not particlyarly
 // interesting
 async function getUserInfo(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>,
+   httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
@@ -1091,11 +1090,7 @@ async function getUserInfo(
 // Not tracking events for this method since they are frequent and not particlyarly
 // interesting
 async function getAuthenticators(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>,
+   httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
@@ -1161,13 +1156,12 @@ async function loadAuthenticators(
 
 
 async function deleteAuthenticator(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>,
+   httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
+   const {
+      resourceId
+   } = httpDetails;
 
    if (!verifiedUser) {
       throw new ParamError('user not found')
@@ -1217,12 +1211,13 @@ async function deleteAuthenticator(
 // process or creating a new passkey. Caller is expected to followup
 // with a call to verifyRegistration
 async function recover(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
+   const {
+      rpID,
+      resourceId,
+      params
+   } = httpDetails;
 
    const userCred = resourceId;
    if (!validB64(userCred)) {
@@ -1285,12 +1280,13 @@ async function recover(
 // process or creating a new passkey. Caller is expected to followup
 // with a call to verifyRegistration
 async function recover2(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
+   const {
+      rpID,
+      resourceId,
+      params
+   } = httpDetails;
 
    const unverifiedUser = await getUnverifiedUser(params.userid);
 
@@ -1363,7 +1359,9 @@ async function recover2(
 // If origin is moved to user, then we could add a test here to confirm the
 // original user origin is used for all following actions.
 //
-async function getUnverifiedUser(userId: string): Promise<UnverifiedUserItem> {
+async function getUnverifiedUser(
+   userId: string
+): Promise<UnverifiedUserItem> {
 
    if (!validB64(userId)) {
       throw new ParamError('invalid userid');
@@ -1376,18 +1374,14 @@ async function getUnverifiedUser(userId: string): Promise<UnverifiedUserItem> {
 
    if (!unverifiedUser || !unverifiedUser.data) {
       // vague error to make guessing harder
-      throw new ParamError('user not found')
+      throw new AuthError('user not found')
    }
 
    return unverifiedUser.data;
 }
 
 async function loadAAGUIDs(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
 
    try {
@@ -1426,11 +1420,7 @@ async function loadAAGUIDs(
 
 
 async function cleanse(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
 
    const days = 15;
@@ -1461,12 +1451,11 @@ async function cleanse(
 }
 
 async function consistency(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
+   const {
+      params
+   } = httpDetails;
 
    const batchSize = 14;
 
@@ -1586,11 +1575,7 @@ async function consistency(
 }
 
 async function patch(
-   rpID: string,
-   rpOrigin: string,
-   resourceId: string | undefined,
-   params: QParams,
-   body: Record<string, any>
+   httpDetails: HttpDetails
 ): Promise<Response> {
    // const batchSize = 14;
 
@@ -1755,53 +1740,34 @@ function makeResponse(content: string, status: number, cookie?: string): any {
    return resp;
 }
 
-async function handler(event: any, context: any) {
 
-   // Uncomment for temporary debuging only, since this logs user credentials
-   // console.log(event);
+function parseEvent(event: Record<string, any>) : HttpDetails {
 
-   if (!event || !event['requestContext'] ||
-      !event['requestContext']['http'] || !event['headers'] ||
-      !event['headers']['x-passkey-rpid']
-   ) {
-      return makeResponse("invalid request, missing context", 400);
-   }
+   let userId: string | undefined;
 
-   const reqCookie: string | undefined = event['headers']['cookie'];
    const rpID = event['headers']['x-passkey-rpid'];
-
    let rpOrigin = `https://${rpID}`;
    if (event['headers']['x-passkey-port']) {
       rpOrigin += `:${event['headers']['x-passkey-port']}`;
    }
 
-   let method: string;
-   let resource: string;
-   let userId: string | undefined;
-   let resourceId: string | undefined;
-   let parts: string[];
+   const method = event['requestContext']['http']['method'].toUpperCase();
+   // for now we don't use version, so just strip
+   const parts = event['requestContext']['http']['path'].slice(1).split(/[\/]+/);
 
-   try {
-      method = event['requestContext']['http']['method'].toUpperCase();
-      // for now we don't use version, so just strip
-      parts = event['requestContext']['http']['path'].slice(1).split(/[\/]+/);
-      let offset = 0;
-      if (parts[offset] === 'v1') {
-         // not used yet
-         offset += 1;
-      }
-
-      if (parts[offset] === 'user') {
-         userId = parts[offset + 1];
-         offset += 2;
-      }
-
-      resource = parts[offset];
-      resourceId = parts[offset + 1];
-   } catch (err) {
-      console.error(err);
-      return makeResponse('invalid http request', 400);
+   let offset = 0;
+   if (parts[offset] === 'v1') {
+      // not used yet
+      offset += 1;
    }
+
+   if (parts[offset] === 'user') {
+      userId = parts[offset + 1];
+      offset += 2;
+   }
+
+   const resource: string = parts[offset];
+   const resourceId: string | undefined = parts[offset + 1];
 
    let body: Record<string, any> = {};
    if ('body' in event) {
@@ -1819,41 +1785,71 @@ async function handler(event: any, context: any) {
       }
    }
 
-   const params: QParams = event.queryStringParameters ?? {};
+   const params: QParams = event['queryStringParameters'] ?? {};
+   const cookie: string | undefined = event['headers']['cookie'];
 
-   let func: HttpHandler;
-   let authorize = true;
+   return {
+      method: method,
+      rpID: rpID,
+      rpOrigin: rpOrigin,
+      resource: resource,
+      resourceId: resourceId,
+      params: params,
+      body: body,
+      cookie: cookie,
+      userId: userId
+   };
+}
 
+async function handler(event: any, context: any) {
+
+   // Uncomment for temporary debuging only, since this logs user credentials
+   // console.log(event);
+
+   if (!event || !event['requestContext'] ||
+      !event['requestContext']['http'] || !event['headers'] ||
+      !event['headers']['x-passkey-rpid']
+   ) {
+      return makeResponse("invalid request, missing context", 400);
+   }
+
+   let httpDetails: HttpDetails;
    try {
-      [func, authorize] = FUNCTIONS[method][resource];
-      if (!func || authorize === undefined) {
-         throw new Error(`no handler for: ${method} ${resource}`);
-      }
+      httpDetails = parseEvent(event);
    } catch (err) {
       console.error(err);
-      return makeResponse(`no handler for: ${method} ${resource}`, 404);
+      return makeResponse('invalid http request', 400);
+   }
+
+   let func: HttpHandler | undefined;
+   let authorize: boolean | undefined = true;
+
+   [func, authorize] = FUNCTIONS[httpDetails.method][httpDetails.resource];
+   if (!func || authorize === undefined) {
+      const msg = `no handler for: ${httpDetails.method} ${httpDetails.resource}`;
+      console.error(msg);
+      return makeResponse(msg, 404);
    }
 
    try {
-      console.log(`calling function for: ${method} ${resource} authorize: ${authorize}`);
-      console.log(`rpID: ${rpID} rpOrigin: ${rpOrigin}`);
+      console.log(`calling function for: ${httpDetails.method} ${httpDetails.resource} authorize: ${authorize}`);
+      console.log(`rpID: ${httpDetails.rpID} rpOrigin: ${httpDetails.rpOrigin}`);
       // Uncomment for debugging
-      //      console.log('resourceId:' + resourceId);
-      //      console.log('params: ' + JSON.stringify(params));
-      //      console.log('body: ', body);
+      //      console.log('resourceId:' + httpDetails.resourceId);
+      //      console.log('params: ' + JSON.stringify(httpDetails.params));
+      //      console.log('body: ', httpDetails.body);
 
       let verifiedUser: VerifiedUserItem | undefined;
-
       if (authorize) {
-         if (!reqCookie || !userId) {
+         if (!httpDetails.cookie || !httpDetails.userId) {
             throw new AuthError('not authorized');
          }
-         const unverifiedUser = await getUnverifiedUser(userId);
-         verifiedUser = await verifyCookie(unverifiedUser, reqCookie);
+         const unverifiedUser = await getUnverifiedUser(httpDetails.userId);
+         verifiedUser = await verifyCookie(unverifiedUser, httpDetails.cookie);
       }
       // console.log(`user: ${verifiedUser}`);
 
-      const response = await func(rpID, rpOrigin, resourceId, params, body, verifiedUser);
+      const response = await func(httpDetails, verifiedUser);
       let respCookie: string | undefined;
       if (response.startSession) {
          respCookie = await createCookie(response.startSession);
@@ -1861,6 +1857,7 @@ async function handler(event: any, context: any) {
          respCookie = killCookie();
       }
       return makeResponse(response.content, 200, respCookie);
+
    } catch (err) {
       console.error(err);
       if (err instanceof ParamError) {
