@@ -36,7 +36,7 @@ This document provides documentation for the passkey-based authentication server
   - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
   - `recovery` (optional, boolean): If `true`, the response will include the recovery id in `recoveryId`.
 - **Responses:**
-  - `200 OK`: A `LoginUserInfo` object.
+  - `200 OK`: A `LoginUserInfo` object and authorization cookie.
   - `400 Bad Request`: The request was malformed or the request body is invalid.
   - `401 Unauthorized`: The registration challenge has expired or is invalid.
 
@@ -63,7 +63,7 @@ This document provides documentation for the passkey-based authentication server
   - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
   - `recovery` (optional, boolean): If `true`, the response will include the recovery id in `recoveryId`.
 - **Responses:**
-  - `200 OK`: A `LoginUserInfo` object.
+  - `200 OK`: A `LoginUserInfo` object and authorization cookie.
   - `400 Bad Request`: The request was malformed or the request body is invalid.
   - `401 Unauthorized`: The authentication challenge has expired or is invalid.
 
@@ -85,7 +85,7 @@ This document provides documentation for the passkey-based authentication server
 - **Authorization:** Required
 - **Description:** Ends the current session and invalidates the session cookie.
 - **Responses:**
-  - `200 OK`: A "bye" message.
+  - `200 OK`: A "bye" message and kill cookie that removes authorization.
   - `400 Bad Request`: The request was malformed.
   - `401 Unauthorized`: The request is not authorized.
 
@@ -230,6 +230,8 @@ The SimpleWebAuthn/server `PublicKeyCredentialRequestOptionsJSON` object contain
 
 ## Authorization
 
-Endpoints that require authorization expect a `__Host-JWT` cookie to be sent with the request. This cookie contains a JSON Web Token (JWT) that is used to authenticate and
-authorize the user. The JWT is issued upon successful authentication and is valid for
-a limited time.
+Endpoints that require authorization expect a `__Host-JWT` cookie to be sent with the
+request. This cookie is issued by the `/verifyauth` and `/verifyreg` endpoints upon
+successful authentication and contains a JSON Web Token (JWT) for authorization. The
+JWT is valid for a limited time or until the `/endsess` endpoint is called which
+returns a `__Host-JWT` cookie without a JWT, ending a session immediately.
