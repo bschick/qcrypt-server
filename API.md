@@ -87,7 +87,7 @@ This document provides documentation for the passkey-based authentication server
 - **Path:** `/verifyreg`
 - **Authorization:** Not required
 - **Description:** Verifies a registration response from a client.
-- **Request Body:** The registration response from the client as a JSON object. For backward compatibility, the `includeusercred` and `includerecovery` flags can be sent in the body.
+- **Request Body:** The registration response from the client as a JSON object. For backward compatibility, the `includeusercred` and `includerecovery` flags can also be sent in the body.
 - **Query Parameters:**
   - `usercred` (optional, boolean): If `true`, the response will include the decrypted `userCred`.
   - `recovery` (optional, boolean): If `true`, the response will include the decrypted `recoveryId`.
@@ -102,7 +102,7 @@ This document provides documentation for the passkey-based authentication server
 - **Path:** `/verifyauth`
 - **Authorization:** Not required
 - **Description:** Verifies an authentication response from a client.
-- **Request Body:** The authentication response from the client as a JSON object. For backward compatibility, the `includeusercred` and `includerecovery` flags can be sent in the body.
+- **Request Body:** The authentication response from the client as a JSON object. For backward compatibility, the `includeusercred` and `includerecovery` flags can also be sent in the body.
 - **Query Parameters:**
   - `usercred` (optional, boolean): If `true`, the response will include the decrypted `userCred`.
   - `recovery` (optional, boolean): If `true`, the response will include the decrypted `recoveryId`.
