@@ -452,14 +452,11 @@ async function verifyRegistration(
    body: Record<string, any>
 ): Promise<Response> {
 
-   if (!body.userId) {
-      throw new ParamError('missing userId');
-   }
+   const unverifiedUser = await getUnverifiedUser(body.userId);
+
    if (!validB64(body.challenge)) {
       throw new ParamError('invalid challenge format');
    }
-
-   const unverifiedUser = await getUnverifiedUser(body.userId);
 
    // Make sure this is a challenge the server really issued and that it is
    // not outdated. Once validated, remove to prevent reuse
@@ -610,7 +607,6 @@ async function verifyRegistration(
          }).set({
             lastCredentialId: auth.data.credentialId,
             authCount: unverifiedUser.authCount + 1
-
          }).go();
 
          unverifiedUser.lastCredentialId = auth.data.credentialId;
@@ -738,7 +734,7 @@ async function userRegistration(
       throw new ParamError('user name missing');
    }
    if (userName.length < 6 || userName.length > 31) {
-      throw new ParamError('user name must greater than 5 and less than 32 character');
+      throw new ParamError('user name must greater than 5 and less than 32 characters');
    }
 
    let uId: string | undefined;
@@ -822,7 +818,7 @@ async function registrationOptionsOld(
          throw new ParamError('must provide username or userid');
       }
       if (userName.length < 6 || userName.length > 31) {
-         throw new ParamError('username must greater than 5 and less than 32 character');
+         throw new ParamError('username must greater than 5 and less than 32 characters');
       }
 
       let uId: string | undefined;
@@ -1107,8 +1103,8 @@ async function getAuthenticators(
       throw new ParamError('user not found')
    }
 
-   const resonse = await loadAuthenticators(verifiedUser);
-   return { content: JSON.stringify(resonse) };
+   const response = await loadAuthenticators(verifiedUser);
+   return { content: JSON.stringify(response) };
 }
 
 
