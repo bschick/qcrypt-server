@@ -39,7 +39,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { sign, verify, decode, type JwtPayload } from 'jsonwebtoken';
-import { sanitizeXSS, validB64 } from './utils';
+import { ParamError, AuthError, sanitizeString, validB64 } from './utils';
 
 type UnverifiedUserItem = EntityItem<typeof Users>;
 type VerifiedUserItem = EntityRecord<typeof Users> & {
@@ -118,8 +118,6 @@ const darkFileDefault = 'assets/aaguid/img/default_dark.svg'
 const RPNAME = 'Quick Crypt';
 const ALGIDS = [24, 7, 3, 1, -7, -257];
 
-const HASHALG = 'blake2s256';
-
 const USERID_BYTES = 16;
 const USERCRED_BYTES = 32;
 const JWTMATERIAL_BYTES = 32;
@@ -128,13 +126,6 @@ const RECOVERYID_BYTES = 16;
 const KMS_KEYID = process.env.KMSKeyId;
 const kmsClient = new KMSClient({ region: "us-east-1" });
 let jwtMaterial: Uint8Array | undefined;
-
-
-class ParamError extends Error {
-}
-
-class AuthError extends Error {
-}
 
 
 function base64UrlEncode(bytes: Uint8Array | undefined): string | undefined {
@@ -162,7 +153,7 @@ function isVerified(unverifiedUser: UnverifiedUserItem, userId: string): unverif
 
 function checkVerified(unverifiedUser: UnverifiedUserItem, userId: string): VerifiedUserItem {
    if (!isVerified(unverifiedUser, userId)) {
-      throw new Error('user not verified');
+      throw new ParamError('user not verified');
    }
    return unverifiedUser;
 }
@@ -527,7 +518,7 @@ async function verifyRegistration(
 
       if (aaguidDetails && aaguidDetails.data) {
          description = aaguidDetails.data.name ?? 'Passkey';
-         description.slice(0, 42);
+         description = description.slice(0, 42);
       } else {
          console.error('aaguid not found:', JSON.stringify(aaguid));
       }
@@ -732,10 +723,7 @@ async function userRegistration(
 
    // Totally new user, must provide a username
    // keep ?? body until clients update for backward compat
-   const userName = sanitizeXSS(body.userName ?? body);
-   if (!userName) {
-      throw new ParamError('user name missing');
-   }
+   const userName = sanitizeString(body.userName ?? body);
    if (userName.length < 6 || userName.length > 31) {
       throw new ParamError('user name must greater than 5 and less than 32 characters');
    }
@@ -817,10 +805,7 @@ async function registrationOptionsOld(
    } else {
       // Totally new user, must provide a username
       // keep ?? body until clients update for backward compat
-      const userName = sanitizeXSS(body.userName ?? body);
-      if (!userName) {
-         throw new ParamError('must provide username or userid');
-      }
+      const userName = sanitizeString(body.userName ?? body);
       if (userName.length < 6 || userName.length > 31) {
          throw new ParamError('username must greater than 5 and less than 32 characters');
       }
@@ -995,10 +980,7 @@ async function putDescription(
    }
 
    // keep ?? body until clients update for backward compat
-   const description = sanitizeXSS(body.description ?? body);
-   if (!description) {
-      throw new ParamError('missing description');
-   }
+   const description = sanitizeString(body.description ?? body);
    if (description.length < 6 || description.length > 42) {
       throw new ParamError('description must more than 5 and less than 43 character');
    }
@@ -1044,10 +1026,7 @@ async function putUserName(
    }
 
    // keep ?? body until clients update for backward compat
-   const userName = sanitizeXSS(body.userName ?? body);
-   if (!userName) {
-      throw new ParamError('missing username');
-   }
+   const userName = sanitizeString(body.userName ?? body);
    if (userName.length < 6 || userName.length > 31) {
       throw new ParamError('username must more than 5 and less than 32 character');
    }
@@ -1672,10 +1651,10 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
    const token = sign(
       payload,
       jwtKey, {
-         algorithm: 'HS512',
-         expiresIn: expiresIn,
-         issuer: 'quickcrypt'
-      }
+      algorithm: 'HS512',
+      expiresIn: expiresIn,
+      issuer: 'quickcrypt'
+   }
    );
 
    return `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=${expiresIn}`
@@ -1701,9 +1680,9 @@ async function verifyCookie(
       payload = verify(
          token,
          jwtKey, {
-            algorithms: ['HS512'],
-            issuer: 'quickcrypt'
-         }
+         algorithms: ['HS512'],
+         issuer: 'quickcrypt'
+      }
       ) as JwtPayload;
 
    } catch (err) {
@@ -1741,7 +1720,7 @@ function makeResponse(content: string, status: number, cookie?: string): any {
 }
 
 
-function parseEvent(event: Record<string, any>) : HttpDetails {
+function parseEvent(event: Record<string, any>): HttpDetails {
 
    let userId: string | undefined;
 
@@ -1779,7 +1758,7 @@ function parseEvent(event: Record<string, any>) : HttpDetails {
          body = JSON.parse(rawBody);
       } catch (err) {
          console.error('Invalid JSON body:', err);
-//         return makeResponse('invalid json body', 400);
+         // throw new ParamError('invalid json body');
          // temporarily for backward compat while clients update, force it through
          body = rawBody;
       }
