@@ -30,7 +30,8 @@ import {
    KMSClient,
    EncryptCommand,
    DecryptCommand,
-   GenerateRandomCommand
+   GenerateRandomCommand,
+   type EncryptCommandOutput
 } from "@aws-sdk/client-kms";
 
 import { Buffer } from "node:buffer";
@@ -123,7 +124,7 @@ const USERCRED_BYTES = 32;
 const JWTMATERIAL_BYTES = 32;
 const RECOVERYID_BYTES = 16;
 
-const KMS_KEYID = process.env.KMSKeyId;
+const KMS_KEYID_NEW = process.env.KMSKeyId_New;
 const kmsClient = new KMSClient({ region: "us-east-1" });
 let jwtMaterial: Uint8Array | undefined;
 
@@ -161,15 +162,16 @@ function checkVerified(unverifiedUser: UnverifiedUserItem, userId: string): Veri
 
 async function encryptField(
    field: Uint8Array,
-   context: { [key: string]: string }
+   context: { [key: string]: string },
+   keyId: string = KMS_KEYID_NEW!
 ): Promise<string> {
-   if (!KMS_KEYID) {
+   if (!keyId) {
       throw new Error('missing kms keyid')
    }
 
    const enc = new EncryptCommand({
       Plaintext: field,
-      KeyId: KMS_KEYID,
+      KeyId: keyId,
       EncryptionContext: context
    });
 
@@ -185,16 +187,17 @@ async function encryptField(
 async function decryptField(
    fieldEnc: string,
    context: { [key: string]: string },
-   expectedBytes: number
+   expectedBytes: number,
+   keyId: string = KMS_KEYID_NEW!
 ): Promise<Uint8Array> {
-   if (!KMS_KEYID) {
+   if (!keyId) {
       throw new Error('missing kms keyid')
    }
 
    const fieldEncBytes = base64UrlDecode(fieldEnc);
    const dec = new DecryptCommand({
       CiphertextBlob: fieldEncBytes,
-      KeyId: KMS_KEYID,
+      KeyId: keyId,
       EncryptionContext: context
    });
 
@@ -1558,7 +1561,7 @@ async function patch(
 ): Promise<Response> {
    // const batchSize = 14;
 
-   // const userAttrs = ["userId", "userCred"] as const;
+   // const userAttrs = ["userId", "userCred", "userCredEnc", "recoveryIdEnc"] as const;
    // let users = await Users.scan.go({
    //    attributes: userAttrs,
    //    limit: batchSize
@@ -1568,43 +1571,66 @@ async function patch(
 
    // while (users && users.data && users.data.length > 0) {
    //    total += users.data.length;
+   //    console.log(`got ${users.data.length} users`);
 
    //    for (let user of users.data) {
+   //       console.log(`trying ${user.userId}`);
    //       // fake user to prevent Id use
-   //       if (user.userId == 'AAAAAAAAAAAAAAAAAAAAAA') {
+   //       if (user.userId === 'AAAAAAAAAAAAAAAAAAAAAA') {
    //          continue;
    //       }
 
-   //       const userCredBytes = base64Decode(user.userCred);
-   //       const enc = new EncryptCommand({
-   //          Plaintext: userCredBytes ?? new Uint8Array([0]),
-   //          KeyId: KMS_KEYID,
-   //          EncryptionContext: {
-   //             userId: user.userId
-   //          }
-   //       });
-
    //       try {
-   //          const result = await kmsClient.send(enc);
-   //          if (!result.CiphertextBlob) {
-   //             throw new Error('Encryption failed for: ' + user);
+   //          let credEnc: string | undefined;
+   //          let recEnc: string | undefined;
+
+   //          if(user.userCred) {
+   //             const userCredBytes = base64Decode(user.userCred)!;
+
+   //             credEnc = await encryptField(
+   //                userCredBytes,
+   //                { userId: user.userId }
+   //             );
    //          }
 
-   //          await Users.patch({
-   //             userId: user.userId,
-   //          }).set({
-   //             userCredEnc: base64UrlEncode(result.CiphertextBlob)
-   //          }).go();
+   //          if(user.recoveryIdEnc) {
+   //             const recDec = await decryptField(
+   //                user.recoveryIdEnc,
+   //                { userId: user.userId },
+   //                RECOVERYID_BYTES,
+   //                KMS_KEYID_OLD
+   //             );
 
-   //          console.log(`set ${user.userId}`)
+   //             recEnc = await encryptField(
+   //                recDec,
+   //                { userId: user.userId }
+   //             );
+   //          }
+
+   //          if (credEnc) {
+   //             const setter: Record<string, string> = {
+   //                userCredEnc: credEnc
+   //             };
+   //             if (recEnc) {
+   //                setter.recoveryIdEnc = recEnc;
+   //             }
+
+   //             await Users.patch({
+   //                userId: user.userId,
+   //             }).set(setter).go();
+
+   //             console.log(`set ${user.userId} credEnc ${credEnc} recEnc ${recEnc}`);
+   //          } else {
+   //             console.error(`missing credEnc ${credEnc} for ${user.userId}`);
+   //          }
 
    //       } catch (error) {
-   //          console.error("Error ", error);
-   //          throw error;
+   //          console.error(`Error for ${user.userId}`, error);
    //       }
    //    }
 
    //    if (!users.cursor) {
+   //       console.log('breaking');
    //       break;
    //    }
    //    users = await Users.scan.go({
@@ -1617,6 +1643,7 @@ async function patch(
    // console.log(`${total} users total`);
    return { content: "done" };
 }
+
 
 // User may be verified or unverified
 async function getJwtKey(user: UnverifiedUserItem): Promise<Buffer> {
