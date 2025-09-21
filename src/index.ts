@@ -988,6 +988,9 @@ async function getAuthenticators(
 }
 
 
+const aaguidCache = new Map();
+const AAGUID_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 async function loadAuthenticators(
    verifiedUser: VerifiedUserItem,
    consistent: boolean = false
@@ -1010,31 +1013,41 @@ async function loadAuthenticators(
    });
 
    const aaguids = new Set<string>(auths.data.map((cred) => cred.aaguid || ''));
-   const aaguidsGet = Array.from(aaguids).map((aaguid) => ({
-      aaguid: aaguid
-   }));
+   const aaguidsToFetch: string[] = [];
 
-   // Could add a short-cut for one 00000000 aaguid only
-
-   // ElectroDB conversts array get to batch get under the covers
-   const aaguidsDetail = await AAGUIDs.get(aaguidsGet).go();
-   const aaguidsMap = new Map();
-
-   for (let aaguidDetail of aaguidsDetail.data) {
-      aaguidsMap.set(aaguidDetail.aaguid, {
-         lightIcon: aaguidDetail.lightIcon,
-         darkIcon: aaguidDetail.darkIcon,
-         name: aaguidDetail.name
-      });
+   for (const aaguid of aaguids) {
+      const cachedItem = aaguidCache.get(aaguid);
+      if (!cachedItem || (Date.now() - cachedItem.timestamp > AAGUID_CACHE_TTL_MS)) {
+         aaguidsToFetch.push(aaguid);
+      }
    }
 
-   const authenticators: AuthenticatorInfo[] = auths.data.map((cred) => ({
-      credentialId: cred.credentialId,
-      description: cred.description || '',
-      lightIcon: aaguidsMap.get(cred.aaguid)?.lightIcon ?? lightFileDefault,
-      darkIcon: aaguidsMap.get(cred.aaguid)?.darkIcon ?? darkFileDefault,
-      name: aaguidsMap.get(cred.aaguid)?.name ?? 'Passkey',
-   }));
+   if (aaguidsToFetch.length > 0) {
+      const getParams = aaguidsToFetch.map((aaguid) => ({ aaguid: aaguid }));
+      const aaguidsDetail = await AAGUIDs.get(getParams).go();
+
+      for (let aaguidDetail of aaguidsDetail.data) {
+         aaguidCache.set(aaguidDetail.aaguid, {
+            data: {
+               lightIcon: aaguidDetail.lightIcon,
+               darkIcon: aaguidDetail.darkIcon,
+               name: aaguidDetail.name
+            },
+            timestamp: Date.now()
+         });
+      }
+   }
+
+   const authenticators: AuthenticatorInfo[] = auths.data.map((cred) => {
+      const cachedItem = aaguidCache.get(cred.aaguid);
+      return {
+         credentialId: cred.credentialId,
+         description: cred.description || '',
+         lightIcon: cachedItem?.data.lightIcon ?? lightFileDefault,
+         darkIcon: cachedItem?.data.darkIcon ?? darkFileDefault,
+         name: cachedItem?.data.name ?? 'Passkey',
+      }
+   });
 
    return authenticators;
 }
@@ -1113,6 +1126,10 @@ async function recover(
    const unverifiedUser = await getUnverifiedUser(params.userid);
    const verifiedUser = checkVerified(unverifiedUser, params.userid);
 
+   if (verifiedUser.recoveryIdEnc && verifiedUser.recoveryIdEnc.length > 1) {
+      throw new ParamError('must use recovery words instead');
+   }
+
    const userCredDecBytes = await decryptField(
       verifiedUser.userCredEnc,
       { userId: unverifiedUser.userId },
@@ -1122,10 +1139,6 @@ async function recover(
    if (base64UrlEncode(userCredDecBytes) !== userCred) {
       // vague error to make guessing harder
       throw new ParamError('user not found')
-   }
-
-   if (verifiedUser.recoveryIdEnc && verifiedUser.recoveryIdEnc.length > 1) {
-      throw new ParamError('must use recovery words instead');
    }
 
    const auths = await Authenticators.query.byUserId({
