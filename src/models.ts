@@ -23,10 +23,6 @@ export const Users = new Entity(
             type: "string",
             required: true
          },
-         userCred: {
-            type: "string",
-            required: false
-         },
          userCredEnc: {
             type: "string",
             required: false

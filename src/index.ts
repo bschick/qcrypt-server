@@ -49,9 +49,7 @@ type VerifiedUserItem = EntityRecord<typeof Users> & {
 };
 type AuthItem = EntityItem<typeof Authenticators>;
 
-type QParams = {
-   [key: string]: string;
-};
+type QParams = Record<string, string>;
 
 type HttpDetails = {
    method: string,
@@ -137,6 +135,8 @@ function base64UrlDecode(base64: string | undefined): Buffer | undefined {
    return base64 ? Buffer.from(base64, 'base64url') : undefined;
 }
 
+// Node implementation will handle either base64 or base64Url (for internal encoding and storage
+// only use base64UrlEncode)
 function base64Decode(base64: string | undefined): Buffer | undefined {
    return base64 ? Buffer.from(base64, 'base64') : undefined;
 }
@@ -146,7 +146,6 @@ function isVerified(unverifiedUser: UnverifiedUserItem, userId: string): unverif
    return unverifiedUser.verified &&
       unverifiedUser.userId === userId &&
       validB64(unverifiedUser.userId) &&
-      validB64(unverifiedUser.userCred) &&
       validB64(unverifiedUser.userCredEnc) &&
       unverifiedUser.userName !== undefined && unverifiedUser.userName.length > 0 &&
       unverifiedUser.createdAt !== undefined;
@@ -392,10 +391,8 @@ async function verifyAuthentication(
       verifiedUser.lastCredentialId = authenticator.data.credentialId;
       verifiedUser.authCount += 1;
 
-      // temporary for backward compat. delete after client updates
-      // (replace with just !!param.)
-      const includeUserCred = !!params.usercred || !!body.includeusercred;
-      const includeRecovery = !!params.recovery || !!body.includerecovery;
+      const includeUserCred = !!params.usercred;
+      const includeRecovery = !!params.recovery;
 
       if (includeRecovery &&
          (!verifiedUser.recoveryIdEnc || verifiedUser.recoveryIdEnc.length == 0)) {
@@ -556,13 +553,13 @@ async function verifyRegistration(
          throw new Error("GenerateRandomCommand failure");
       }
 
-      // For both backward compat and to reduces calls to KMS when user creation
+      // To reduces calls to KMS when user creation
       // is abandonded, delay creation for userCred and recoveryId until this point.
       // If this is a new user reg, verified is false and the user will not have
       // a userCred or recoveryId
       if (!unverifiedUser.verified) {
          // Careful to never overwrite userCredEnc (due to a bug or whatever)
-         if (unverifiedUser.userCred || unverifiedUser.userCredEnc || unverifiedUser.recoveryIdEnc) {
+         if (unverifiedUser.userCredEnc || unverifiedUser.recoveryIdEnc) {
             throw new Error('unexpected user credential or recovery id');
          }
 
@@ -583,7 +580,6 @@ async function verifyRegistration(
             userId: unverifiedUser.userId,
          }).set({
             verified: true,
-            userCred: userCredB64,
             userCredEnc: userCredEnc,
             recoveryIdEnc: recoveryIdEnc,
             lastCredentialId: auth.data.credentialId,
@@ -591,7 +587,6 @@ async function verifyRegistration(
          }).go();
 
          unverifiedUser.verified = true;
-         unverifiedUser.userCred = userCredB64;
          unverifiedUser.userCredEnc = userCredEnc;
          unverifiedUser.recoveryIdEnc = recoveryIdEnc;
          unverifiedUser.lastCredentialId = auth.data.credentialId;
@@ -615,10 +610,8 @@ async function verifyRegistration(
       const verifiedUser = checkVerified(unverifiedUser, body.userId);
       startSession = verifiedUser;
 
-      // temporary for backward compat. delete after client updates
-      // (replace with just !!param.)
-      const includeUserCred = !!params.usercred || !!body.includeusercred;
-      const includeRecovery = !!params.recovery || !!body.includerecovery;
+      const includeUserCred = !!params.usercred;
+      const includeRecovery = !!params.recovery;
 
       // force consistent read to capture recent create
       const authenticators = await loadAuthenticators(verifiedUser, true);
@@ -725,8 +718,7 @@ async function userRegistration(
    } = httpDetails;
 
    // Totally new user, must provide a username
-   // keep ?? body until clients update for backward compat
-   const userName = sanitizeString(body.userName ?? body);
+   const userName = sanitizeString(body.userName);
    if (userName.length < 6 || userName.length > 31) {
       throw new ParamError('user name must greater than 5 and less than 32 characters');
    }
@@ -772,7 +764,6 @@ async function userRegistration(
    const created = await Users.create({
       userId: uId,
       userName: userName,
-      userCred: undefined,
       userCredEnc: undefined,
       recoveryIdEnc: undefined
    }).go();
@@ -783,92 +774,6 @@ async function userRegistration(
 
    return registrationOptions(rpID, created.data);
 }
-
-// remove after backward compat, delete entire function later
-async function registrationOptionsOld(
-   httpDetails: HttpDetails
-): Promise<Response> {
-   const {
-      rpID,
-      params,
-      body,
-   } = httpDetails;
-
-   let unverifiedUser: UnverifiedUserItem;
-
-   if (params.userid) {
-      // means this is a known user who is creating a new credential cannot
-      // specify a new username
-      if (body) {
-         throw new ParamError('cannot specify username for existing user');
-      }
-
-      unverifiedUser = await getUnverifiedUser(params.userid);
-
-   } else {
-      // Totally new user, must provide a username
-      // keep ?? body until clients update for backward compat
-      const userName = sanitizeString(body.userName ?? body);
-      if (userName.length < 6 || userName.length > 31) {
-         throw new ParamError('username must greater than 5 and less than 32 characters');
-      }
-
-      let uId: string | undefined;
-
-      const RETRIES = 3;
-
-      // Reduce round-trips by getting enough data for 3 x 16 bytes ID tries
-      // and 1 x 32 bytes userCred
-      const rparams = {
-         NumberOfBytes: RETRIES * USERID_BYTES
-      };
-      const rand = new GenerateRandomCommand(rparams);
-      const result = await kmsClient.send(rand);
-
-      const randData = result.Plaintext;
-      if (!randData || randData.byteLength != rparams.NumberOfBytes) {
-         throw new Error("GenerateRandomCommand failure");
-      }
-
-      // Loop in the very unlikley event that we randomly pick
-      // a duplicate (out of 3.4e38 possible)
-      for (let i = 0; i < RETRIES; ++i) {
-         const uIdBytes = randData.slice(i * USERID_BYTES, (i + 1) * USERID_BYTES);
-         uId = base64UrlEncode(uIdBytes)!;
-
-         const users = await Users.query.byUserId({
-            userId: uId
-         }).go({ attributes: ['userId'] });
-
-         if (!users || users.data.length == 0) {
-            break;
-         } else {
-            uId = undefined;
-         }
-      }
-
-      if (!uId) {
-         throw new Error('could not allocate userId');
-      }
-
-      const created = await Users.create({
-         userId: uId,
-         userName: userName,
-         userCred: undefined,
-         userCredEnc: undefined,
-         recoveryIdEnc: undefined
-      }).go();
-
-      if (!created || !created.data) {
-         throw new ParamError('user not created or found')
-      }
-
-      unverifiedUser = created.data;
-   }
-
-   return registrationOptions(rpID, unverifiedUser);
-};
-
 
 async function registrationOptions(
    rpID: string,
@@ -982,8 +887,7 @@ async function putDescription(
       throw new ParamError('user not found')
    }
 
-   // keep ?? body until clients update for backward compat
-   const description = sanitizeString(body.description ?? body);
+   const description = sanitizeString(body.description);
    if (description.length < 6 || description.length > 42) {
       throw new ParamError('description must more than 5 and less than 43 character');
    }
@@ -1028,8 +932,7 @@ async function putUserName(
       throw new ParamError('user not found')
    }
 
-   // keep ?? body until clients update for backward compat
-   const userName = sanitizeString(body.userName ?? body);
+   const userName = sanitizeString(body.userName);
    if (userName.length < 6 || userName.length > 31) {
       throw new ParamError('username must more than 5 and less than 32 character');
    }
@@ -1206,16 +1109,20 @@ async function recover(
       throw new ParamError('invalid user credential');
    }
 
-   // Require an existing user for recovery
+   // Require an existing verified user for recovery
    const unverifiedUser = await getUnverifiedUser(params.userid);
+   const verifiedUser = checkVerified(unverifiedUser, params.userid);
 
-   if (unverifiedUser.userCred !== userCred || !unverifiedUser.verified) {
+   const userCredDecBytes = await decryptField(
+      verifiedUser.userCredEnc,
+      { userId: unverifiedUser.userId },
+      USERCRED_BYTES
+   );
+
+   if (base64UrlEncode(userCredDecBytes) !== userCred) {
       // vague error to make guessing harder
       throw new ParamError('user not found')
    }
-
-   // now verified
-   const verifiedUser = unverifiedUser;
 
    if (verifiedUser.recoveryIdEnc && verifiedUser.recoveryIdEnc.length > 1) {
       throw new ParamError('must use recovery words instead');
@@ -1270,31 +1177,30 @@ async function recover2(
       params
    } = httpDetails;
 
-   const unverifiedUser = await getUnverifiedUser(params.userid);
-
    const recoveryId = resourceId;
    if (!validB64(recoveryId)) {
       throw new ParamError('invalid recovery id');
    }
 
-   if (!unverifiedUser.recoveryIdEnc ||
-      unverifiedUser.recoveryIdEnc.length < 10 ||
-      !unverifiedUser.verified) {
+   // Require an existing verified user for recovery
+   const unverifiedUser = await getUnverifiedUser(params.userid);
+   const verifiedUser = checkVerified(unverifiedUser, params.userid);
+
+   // due to switch from recover to recover2, not all verified users have recoveryIdEnc
+   if (!verifiedUser.recoveryIdEnc ||
+      verifiedUser.recoveryIdEnc.length < 10 ) {
       throw new ParamError('invalid recovery id'); // vague on purpose
    }
 
-   const recoveryIdDec = await decryptField(
-      unverifiedUser.recoveryIdEnc,
-      { userId: unverifiedUser.userId },
+   const recoveryIdDecBytes = await decryptField(
+      verifiedUser.recoveryIdEnc,
+      { userId: verifiedUser.userId },
       RECOVERYID_BYTES
    );
 
-   if (base64UrlEncode(recoveryIdDec) !== recoveryId) {
+   if (base64UrlEncode(recoveryIdDecBytes) !== recoveryId) {
       throw new ParamError('invalid recovery id'); // vague on purpose
    }
-
-   // should now be verified
-   const verifiedUser = checkVerified(unverifiedUser, params.userid);
 
    const auths = await Authenticators.query.byUserId({
       userId: verifiedUser.userId
@@ -1561,7 +1467,7 @@ async function patch(
 ): Promise<Response> {
    // const batchSize = 14;
 
-   // const userAttrs = ["userId", "userCred", "userCredEnc", "recoveryIdEnc"] as const;
+   // const userAttrs = ["userId", "userCredEnc", "userCredEncOld", "verified"] as const;
    // let users = await Users.scan.go({
    //    attributes: userAttrs,
    //    limit: batchSize
@@ -1570,60 +1476,37 @@ async function patch(
    // let total = 0;
 
    // while (users && users.data && users.data.length > 0) {
-   //    total += users.data.length;
-   //    console.log(`got ${users.data.length} users`);
+   //    total += users.data.length
 
    //    for (let user of users.data) {
-   //       console.log(`trying ${user.userId}`);
    //       // fake user to prevent Id use
    //       if (user.userId === 'AAAAAAAAAAAAAAAAAAAAAA') {
    //          continue;
    //       }
 
    //       try {
-   //          let credEnc: string | undefined;
-   //          let recEnc: string | undefined;
-
-   //          if(user.userCred) {
-   //             const userCredBytes = base64Decode(user.userCred)!;
-
-   //             credEnc = await encryptField(
-   //                userCredBytes,
-   //                { userId: user.userId }
-   //             );
-   //          }
-
-   //          if(user.recoveryIdEnc) {
-   //             const recDec = await decryptField(
-   //                user.recoveryIdEnc,
+   //          if(user.userCredEncOld && user.userCredEnc) {
+   //             const credDecBytes = await decryptField(
+   //                user.userCredEnc,
    //                { userId: user.userId },
-   //                RECOVERYID_BYTES,
+   //                USERCRED_BYTES
+   //             );
+
+   //             const credDecOldBytes = await decryptField(
+   //                user.userCredEncOld,
+   //                { userId: user.userId },
+   //                USERCRED_BYTES,
    //                KMS_KEYID_OLD
    //             );
 
-   //             recEnc = await encryptField(
-   //                recDec,
-   //                { userId: user.userId }
-   //             );
-   //          }
-
-   //          if (credEnc) {
-   //             const setter: Record<string, string> = {
-   //                userCredEnc: credEnc
-   //             };
-   //             if (recEnc) {
-   //                setter.recoveryIdEnc = recEnc;
-   //             }
-
-   //             await Users.patch({
-   //                userId: user.userId,
-   //             }).set(setter).go();
-
-   //             console.log(`set ${user.userId} credEnc ${credEnc} recEnc ${recEnc}`);
+   //             if (base64UrlEncode(credDecBytes) === base64UrlEncode(credDecOldBytes)) {
+   //                console.log(`all good for ${user.userId} `);
+   //             } else {
+   //                console.error(`mismatched for ${user.userId} of ${base64UrlEncode(credDecBytes)} and ${base64UrlEncode(credDecOldBytes)}`);
+   //            }
    //          } else {
-   //             console.error(`missing credEnc ${credEnc} for ${user.userId}`);
+   //             console.log(`skipping ${user.userId}, ok? ${!user.verified} `);
    //          }
-
    //       } catch (error) {
    //          console.error(`Error for ${user.userId}`, error);
    //       }
@@ -1784,10 +1667,8 @@ function parseEvent(event: Record<string, any>): HttpDetails {
       try {
          body = JSON.parse(rawBody);
       } catch (err) {
-         console.error('Invalid JSON body:', err);
-         // throw new ParamError('invalid json body');
-         // temporarily for backward compat while clients update, force it through
-         body = rawBody;
+         console.error('invalid body json:', err);
+         throw new ParamError('invalid json in body');
       }
    }
 
@@ -1890,7 +1771,6 @@ const FUNCTIONS: {
       username: [putUserName, true],
    },
    POST: {
-      regoptions: [registrationOptionsOld, false], // remove after backward compat
       userreg: [userRegistration, false],
       passkeyreg: [passkeyRegistration, true],
       verifyreg: [verifyRegistration, false],
