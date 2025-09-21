@@ -73,5 +73,3 @@ https://github.com/bschick/qcrypt/tree/main/tests
 
 See `API.md` for request/response formats, required authorization, and returned data models (`UserInfo`, `LoginUserInfo`, `AuthenticatorInfo`).
 
----
-_If any section is unclear or missing, please specify what needs improvement or additional detail._
