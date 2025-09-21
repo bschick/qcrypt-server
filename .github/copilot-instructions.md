@@ -16,7 +16,8 @@
 - **Build:** Run `npm install` then `npm run build` (see `package.json`). Output is in `build/`.
 - **Deploy:** Zip `build/index.js` for AWS Lambda or similar serverless platforms.
 - **Debug:** Use console logging; errors are handled and returned as JSON responses.
-- **Test:** No test suite detected; manual endpoint testing recommended.
+- **Test:** Endpoint and UI tests are located in the quick crypt web application repository at:
+https://github.com/bschick/qcrypt/tree/main/tests
 
 ## Key Patterns & Conventions
 - All API logic is in `src/index.ts`, with one handler per endpoint.
@@ -67,9 +68,6 @@ The main endpoints are documented in `API.md`. Key endpoints include:
 - `POST /recover2/{recoveryId}`: Initiate account recovery by recovery ID.
 - `DELETE /user/{userId}/authenticator/{credentialId}`: Delete an authenticator (auth required).
 
-
-Endpoint tests are located in the quick crypt web application repository at:
-https://github.com/bschick/qcrypt/tree/main/tests
 
 See `API.md` for request/response formats, required authorization, and returned data models (`UserInfo`, `LoginUserInfo`, `AuthenticatorInfo`).
 
