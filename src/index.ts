@@ -96,6 +96,18 @@ type LoginUserInfo = UserInfo & {
    recoveryId?: string;
 }
 
+type AAGUIDInfo = {
+   data: {
+      lightIcon: string;
+      darkIcon: string;
+      name: string;
+   };
+   timestamp: number;
+};
+
+const aaguidCache = new Map<string, AAGUIDInfo>();
+const AAGUID_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 const UnknownUserId = 'unknown';
 
 enum EventNames {
@@ -322,7 +334,7 @@ async function verifyAuthentication(
       throw new ParamError('challenge not valid');
    }
 
-   // should not have to wait, but node.js can exit too fast if we don't
+   // must wait or node.js can exit too fast on error
    await Challenges.delete({
       challenge: body.challenge
    }).go();
@@ -374,19 +386,21 @@ async function verifyAuthentication(
       startSession = verifiedUser
 
       // ok if this fails
-      await Authenticators.patch({
+      const patchAuths = Authenticators.patch({
          userId: authenticator.data.userId,
          credentialId: authenticator.data.credentialId
       }).set({
          lastLogin: Date.now()
       }).go();
 
-      await Users.patch({
+      const patchUsers = Users.patch({
          userId: verifiedUser.userId,
       }).set({
          lastCredentialId: authenticator.data.credentialId,
          authCount: verifiedUser.authCount + 1
       }).go();
+
+      await Promise.all([patchAuths, patchUsers]);
 
       verifiedUser.lastCredentialId = authenticator.data.credentialId;
       verifiedUser.authCount += 1;
@@ -447,11 +461,11 @@ async function verifyRegistration(
       body,
    } = httpDetails;
 
-   const unverifiedUser = await getUnverifiedUser(body.userId);
-
    if (!validB64(body.challenge)) {
       throw new ParamError('invalid challenge format');
    }
+
+   const unverifiedUser = await getUnverifiedUser(body.userId);
 
    // Make sure this is a challenge the server really issued and that it is
    // not outdated. Once validated, remove to prevent reuse
@@ -463,7 +477,7 @@ async function verifyRegistration(
       throw new ParamError('challenge not valid');
    }
 
-   // should not have to wait, but njs can exit if we don't
+   // must wait or njs can exit too fast
    await Challenges.delete({
       challenge: body.challenge
    }).go();
@@ -564,7 +578,6 @@ async function verifyRegistration(
          }
 
          const userCred = randData.slice(0, USERCRED_BYTES);
-         const userCredB64 = base64UrlEncode(userCred)!;
          const userCredEnc = await encryptField(
             userCred,
             { userId: unverifiedUser.userId }
@@ -988,9 +1001,6 @@ async function getAuthenticators(
 }
 
 
-const aaguidCache = new Map();
-const AAGUID_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
 async function loadAuthenticators(
    verifiedUser: VerifiedUserItem,
    consistent: boolean = false
@@ -1013,17 +1023,17 @@ async function loadAuthenticators(
    });
 
    const aaguids = new Set<string>(auths.data.map((cred) => cred.aaguid || ''));
-   const aaguidsToFetch: string[] = [];
+   const aaguidsToGet: string[] = [];
 
    for (const aaguid of aaguids) {
       const cachedItem = aaguidCache.get(aaguid);
       if (!cachedItem || (Date.now() - cachedItem.timestamp > AAGUID_CACHE_TTL_MS)) {
-         aaguidsToFetch.push(aaguid);
+         aaguidsToGet.push(aaguid);
       }
    }
 
-   if (aaguidsToFetch.length > 0) {
-      const getParams = aaguidsToFetch.map((aaguid) => ({ aaguid: aaguid }));
+   if (aaguidsToGet.length > 0) {
+      const getParams = aaguidsToGet.map((aaguid) => ({ aaguid: aaguid }));
       const aaguidsDetail = await AAGUIDs.get(getParams).go();
 
       for (let aaguidDetail of aaguidsDetail.data) {
@@ -1039,7 +1049,7 @@ async function loadAuthenticators(
    }
 
    const authenticators: AuthenticatorInfo[] = auths.data.map((cred) => {
-      const cachedItem = aaguidCache.get(cred.aaguid);
+      const cachedItem = aaguidCache.get(cred.aaguid!);
       return {
          credentialId: cred.credentialId,
          description: cred.description || '',
