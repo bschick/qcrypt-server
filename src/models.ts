@@ -27,6 +27,10 @@ export const Users = new Entity(
             type: "string",
             required: false
          },
+         userCredEncOld: {
+            type: "string",
+            required: false
+         },
          lastCredentialId: {
             type: "string",
             required: false

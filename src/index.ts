@@ -135,6 +135,7 @@ const JWTMATERIAL_BYTES = 32;
 const RECOVERYID_BYTES = 16;
 
 const KMS_KEYID_NEW = process.env.KMSKeyId_New;
+const KMS_KEYID_BACKUP = process.env.KMSKeyId_Old;
 const kmsClient = new KMSClient({ region: "us-east-1" });
 let jwtMaterial: Uint8Array | undefined;
 
@@ -583,6 +584,12 @@ async function verifyRegistration(
             { userId: unverifiedUser.userId }
          );
 
+         const userCredEncBackup = await encryptField(
+            userCred,
+            { userId: unverifiedUser.userId },
+            KMS_KEYID_BACKUP
+         );
+
          const recoveryId = randData.slice(USERCRED_BYTES);
          const recoveryIdEnc = await encryptField(
             recoveryId,
@@ -594,6 +601,7 @@ async function verifyRegistration(
          }).set({
             verified: true,
             userCredEnc: userCredEnc,
+            userCredEncOld: userCredEncBackup,
             recoveryIdEnc: recoveryIdEnc,
             lastCredentialId: auth.data.credentialId,
             authCount: 1
