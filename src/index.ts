@@ -1198,8 +1198,8 @@ async function postRecover(
    // for backward compat, remove params check after client update
    const unverifiedUser = handlerUser.unverifiedUser ?? await getUnverifiedUser(params.userid);
 
-   // Require an existing verified user for recovery
-   const verifiedUser = checkVerified(unverifiedUser, unverifiedUser.userId);
+   // Require an existing verified user for recovery (after ?? is for backward compat and should be deleted)
+   const verifiedUser = checkVerified(unverifiedUser, resources.userid ?? params.userid);
 
    if (verifiedUser.recoveryIdEnc && verifiedUser.recoveryIdEnc.length > 1) {
       throw new ParamError('must use recovery words instead');
@@ -1274,8 +1274,8 @@ async function postRecover2(
    // for backward compat, remove params check after client update
    const unverifiedUser = handlerUser.unverifiedUser ?? await getUnverifiedUser(params.userid);
 
-   // Require an existing verified user for recovery
-   const verifiedUser = checkVerified(unverifiedUser, unverifiedUser.userId);
+   // Require an existing verified user for recovery (after ?? is for backward compat and should be deleted)
+   const verifiedUser = checkVerified(unverifiedUser, resources.userid ?? params.userid);
 
    // due to switch from recover to recover2, not all verified users have recoveryIdEnc
    if (!verifiedUser.recoveryIdEnc ||
