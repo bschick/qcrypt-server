@@ -326,10 +326,14 @@ async function postAuthVerify(
       rpOrigin,
       params,
       body,
+      resources,
    } = httpDetails;
 
    if (!body.response || !body.response.userHandle) {
       throw new ParamError('missing userHandle');
+   }
+   if (resources.userid !== body.response.userHandle) {
+      throw new ParamError('userId mismatch');
    }
    if (!validB64(body.id)) {
       throw new ParamError('invalid authenticatorId');
@@ -477,8 +481,12 @@ async function postRegVerify(
       rpOrigin,
       params,
       body,
+      resources,
    } = httpDetails;
 
+   if (resources.userid !== body.userId) {
+      throw new ParamError('userId mismatch');
+   }
    if (!validB64(body.challenge)) {
       throw new ParamError('invalid challenge format');
    }
