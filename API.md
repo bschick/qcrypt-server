@@ -179,7 +179,7 @@ This document provides documentation for the passkey-based authentication server
 - **Authorization:** Required
 - **Description:** Ends the current session and invalidates the session cookie.
 - **Responses:**
-  - `200 OK`: A "bye" message and kill cookie that removes authorization.
+  - `200 OK`: A JSON object with a `message` key and a value of "done", along with an expired session cookie.
   - `400 Bad Request`: The request was malformed.
   - `401 Unauthorized`: The request is not authorized.
 
@@ -206,6 +206,7 @@ The `LoginUserInfo` object extends the `UserInfo` object with additional informa
 - `pkId` (string, optional): The ID of the public key credential used for the last login.
 - `userCred` (string, optional): A user credential, only returned if requested.
 - `recoveryId` (string, optional): A recovery ID, only returned if requested.
+- `csrf` (string): A Cross-Site Request Forgery (CSRF) token that must be sent in the `x-csrf-token` header for all subsequent authorized requests.
 
 ### AuthenticatorInfo
 
