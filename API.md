@@ -1,87 +1,181 @@
-# API Documentation
+# API Documentation v1
 
-This document provides documentation for the passkey-based authentication server API.
+This document provides documentation for the passkey-based authentication server API v1.
 
-## Endpoints
 
-### POST /userreg
+## Registration Endpoints
+
+### POST /v1/reg/options
 
 - **Method:** `POST`
-- **Path:** `/userreg`
+- **Path:** `/v1/reg/options`
 - **Authorization:** Not required
-- **Description:** Registers a new user and returns registration options for creating a passkey.
+- **Description:** Start registration of a new user and returns registration options for creating a passkey.
 - **Request Body:** A JSON object with a `userName` key. Example: `{"userName": "new_user"}`. User name must greater than 5 and less than 32 characters.
 - **Responses:**
-  - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialCreationOptionsJSON` object.
+  - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialCreationOptionsJSON` JSON object.
   - `400 Bad Request`: The request was malformed or the username is invalid.
 
-### POST /user/{userId}/passkeyreg
+### POST /v1/users/{userid}/reg/verify
 
 - **Method:** `POST`
-- **Path:** `/user/{userId}/passkeyreg`
-- **Authorization:** Required
-- **Description:** Returns registration options for adding a new passkey to an existing user account.
-- **Responses:**
-  - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialCreationOptionsJSON` object.
-  - `401 Unauthorized`: The request is not authorized.
-
-### POST /verifyreg
-
-- **Method:** `POST`
-- **Path:** `/verifyreg`
+- **Path:** `/v1/users/{userid}/reg/verify`
 - **Authorization:** Not required
-- **Description:** Verifies a registration response from a client.
-- **Request Body:** The SimpleWebAuthn/client `RegistrationResponseJSON` JSON object response & `challenge` & `userId` created by client from previous POST to `/userreg` or `/passkeyreg`.
+- **Description:** Verifies a registration response from a client, creating a new user and passkey.
+- **Request Body:** The SimpleWebAuthn/client `RegistrationResponseJSON` JSON object response & `challenge` & `userId` created by client from previous POST to `/v1/reg/options`.
 - **Query Parameters:**
   - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
   - `recovery` (optional, boolean): If `true`, the response will include the recovery id in `recoveryId`.
 - **Responses:**
-  - `200 OK`: A `LoginUserInfo` object and authorization cookie.
+  - `200 OK`: A `LoginUserInfo` JSON object and session cookie.
   - `400 Bad Request`: The request was malformed or the request body is invalid.
   - `401 Unauthorized`: The registration challenge has expired or is invalid.
 
-### GET /authoptions
+
+## Authentication Endpoints
+
+### GET /v1/auth/options
 
 - **Method:** `GET`
-- **Path:** `/authoptions`
+- **Path:** `/v1/auth/options`
 - **Authorization:** Not required
 - **Description:** Retrieves authentication options for a user. If a `userid` query parameter is provided, the response will include a list of allowed credentials for that user only.
 - **Query Parameters:**
   - `userid` (optional): The ID of the user to get authentication options for.
 - **Responses:**
-  - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialRequestOptionsJSON` object.
+  - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialRequestOptionsJSON` JSON object.
   - `400 Bad Request`: The request was malformed or missing required parameters.
 
-### POST /verifyauth
+### POST /v1/users/{userid}/auth/verify
 
 - **Method:** `POST`
-- **Path:** `/verifyauth`
+- **Path:** `/v1/users/{userid}/auth/verify`
 - **Authorization:** Not required
-- **Description:** Verifies an authentication response from a client.
-- **Request Body:** The SimpleWebAuthn/client `AuthenticationResponseJSON` JSON object response & `challenge` created by client from previous GET `/authoptions` response
+- **Description:** Verifies an authentication response from a client and established a new user session.
+- **Request Body:** The SimpleWebAuthn/client `AuthenticationResponseJSON` JSON object response & `challenge` created by client from previous GET `/v1/auth/options` response
 - **Query Parameters:**
   - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
   - `recovery` (optional, boolean): If `true`, the response will include the recovery id in `recoveryId`.
 - **Responses:**
-  - `200 OK`: A `LoginUserInfo` object and authorization cookie.
+  - `200 OK`: A `LoginUserInfo` JSON object and session cookie.
   - `400 Bad Request`: The request was malformed or the request body is invalid.
   - `401 Unauthorized`: The authentication challenge has expired or is invalid.
 
-### POST /user/{userId}/verifysess
+
+## Passkey Endpoints
+
+### GET /v1/users/{userid}/passkeys/options
+
+- **Method:** `GET`
+- **Path:** `/v1/users/{userid}/passkeys/options`
+- **Authorization:** Required
+- **Description:** Returns registration options for adding a new passkey to an existing user account.
+- **Responses:**
+  - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialCreationOptionsJSON` JSON object.
+  - `401 Unauthorized`: The request is not authorized.
+
+### POST /v1/users/{userid}/passkeys/verify
 
 - **Method:** `POST`
-- **Path:** `/user/{userId}/verifysess`
-- **Authorization:** Required
-- **Description:** Verifies the current session.
+- **Path:** `/v1/users/{userid}/passkeys/verify`
+- **Authorization:** Not required
+- **Description:** Verifies a registration response from a client and creates a new passkey to the user account.
+- **Request Body:** The SimpleWebAuthn/client `RegistrationResponseJSON` JSON object response & `challenge` & `userId` created by client from previous POST to `/v1/users/{userid}/passkeys/options`.
+- **Query Parameters:**
+  - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
+  - `recovery` (optional, boolean): If `true`, the response will include the recovery id in `recoveryId`.
 - **Responses:**
-  - `200 OK`: A `LoginUserInfo` object with user credential in `userCred`
+  - `200 OK`: A `LoginUserInfo` JSON object.
+  - `400 Bad Request`: The request was malformed or the request body is invalid.
+  - `401 Unauthorized`: The registration challenge has expired or is invalid.
+
+### PATCH /v1/users/{userid}/passkeys/{credid}
+
+- **Method:** `PATCH`
+- **Path:** `/v1/users/{userid}/passkeys/{credid}}`
+- **Authorization:** Required
+- **Description:** Updates the description of an passkey specified by `credid`.
+- **Request Body:** A JSON object with a `description` key. Example: `{"description": "My Yubikey"}`
+- **Responses:**
+  - `200 OK`: A `UserInfo` JSON object.
+  - `400 Bad Request`: The request was malformed or the description is invalid.
+  - `401 Unauthorized`: The request is not authorized.
+
+### DELETE /v1/users/{userid}/passkeys/{credid}
+
+- **Method:** `DELETE`
+- **Path:** `/v1/users/{userid}/passkeys/{credid}`
+- **Authorization:** Required
+- **Description:** Deletes an passkey specified by `credid`.
+- **Responses:**
+  - `200 OK`: A `UserInfo` JSON object. If this was the last passkey, the entire user account will be deleted and the response will indicate the user is not verified.
+  - `400 Bad Request`: The credential ID is not valid.
+  - `401 Unauthorized`: The request is not authorized.
+
+
+## User Endpoints
+
+### GET /v1/users/{userid}
+
+- **Method:** `GET`
+- **Path:** `/v1/users/{userid}`
+- **Authorization:** Required
+- **Description:** Retrieves information about the user specified by `userid`.
+- **Responses:**
+  - `200 OK`: A `UserInfo` JSON object.
   - `400 Bad Request`: The request was malformed.
   - `401 Unauthorized`: The request is not authorized.
 
-### POST /user/{userId}/endsess
+### PATCH /v1/users/{userid}
+
+- **Method:** `PATCH`
+- **Path:** `/v1/users/{userid}`
+- **Authorization:** Required
+- **Description:** Updates the username of the user specified by `userid`.
+- **Request Body:** A JSON object with a `userName` key. Example: `{"userName": "Some Name"}`
+- **Responses:**
+  - `200 OK`: A `UserInfo` JSON object.
+  - `400 Bad Request`: The request was malformed or the request body is invalid.
+  - `401 Unauthorized`: The request is not authorized.
+
+### POST /v1/users/{userid}/recover/{usercred}
 
 - **Method:** `POST`
-- **Path:** `/user/{userId}/endsess`
+- **Path:** `/v1/users/{userid}/recover/{usercred}`
+- **Authorization:** Not required
+- **Description:** Deprecated, use `/v1/recover2` with `recoveryid` instead. Initiates the account recovery process. This will delete all existing passkeys for the user and return registration options to create a new passkey.
+- **Responses:**
+  - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialCreationOptionsJSON` JSON object.
+  - `400 Bad Request`: The user credential is not valid.
+
+### POST /v1/users/{userid}/recover2/{recoverid}
+
+- **Method:** `POST`
+- **Path:** `/v1/users/{userid}/recover2/{recoverid}`
+- **Authorization:** Not required
+- **Description:** Initiates the account recovery process using a recovery ID provided in `recoveryid`. This will delete all existing passkeys for the user and return registration options to create a new passkey.
+- **Responses:**
+  - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialCreationOptionsJSON` JSON object.
+  - `400 Bad Request`: The recovery ID is not valid.
+
+
+## Session Endpoints
+
+### GET /v1/users/{userid}/session
+
+- **Method:** `GET`
+- **Path:** `/v1/users/{userid}/session`
+- **Authorization:** Required
+- **Description:** If a session exists and is valid, returns logged in information for `userid`.
+- **Responses:**
+  - `200 OK`: A `LoginUserInfo` JSON object including `userCed`.
+  - `400 Bad Request`: The request was malformed.
+  - `401 Unauthorized`: The request is not authorized.
+
+### DELETE /v1/users/{userid}/session
+
+- **Method:** `DELETE`
+- **Path:** `/v1/users/{userid}/session`
 - **Authorization:** Required
 - **Description:** Ends the current session and invalidates the session cookie.
 - **Responses:**
@@ -89,88 +183,6 @@ This document provides documentation for the passkey-based authentication server
   - `400 Bad Request`: The request was malformed.
   - `401 Unauthorized`: The request is not authorized.
 
-
-### GET /user/{userId}/authenticators
-
-- **Method:** `GET`
-- **Path:** `/user/{userId}/authenticators`
-- **Authorization:** Required
-- **Description:** Retrieves the authenticators for a user.
-- **Responses:**
-  - `200 OK`: A JSON array of `AuthenticatorInfo` objects.
-  - `400 Bad Request`: The request was malformed.
-  - `401 Unauthorized`: The request is not authorized.
-
-### GET /user/{userId}/userinfo
-
-- **Method:** `GET`
-- **Path:** `/user/{userId}/userinfo`
-- **Authorization:** Required
-- **Description:** Retrieves information about a user.
-- **Responses:**
-  - `200 OK`: A `UserInfo` object.
-  - `400 Bad Request`: The request was malformed.
-  - `401 Unauthorized`: The request is not authorized.
-
-### PUT /user/{userId}/description/{credentialId}
-
-- **Method:** `PUT`
-- **Path:** `/user/{userId}/description/{credentialId}`
-- **Authorization:** Required
-- **Description:** Updates the description of an authenticator.
-- **Request Body:** A JSON object with a `description` key. Example: `{"description": "My Yubikey"}`
-- **Responses:**
-  - `200 OK`: A `UserInfo` object.
-  - `400 Bad Request`: The request was malformed or the description is invalid.
-  - `401 Unauthorized`: The request is not authorized.
-
-### PUT /user/{userId}/username
-
-- **Method:** `PUT`
-- **Path:** `/user/{userId}/username`
-- **Authorization:** Required
-- **Description:** Updates the username of a user.
-- **Request Body:** A JSON object with a `userName` key. Example: `{"userName": "new_username"}`
-- **Responses:**
-  - `200 OK`: A `UserInfo` object.
-  - `400 Bad Request`: The request was malformed or the request body is invalid.
-  - `401 Unauthorized`: The request is not authorized.
-
-
-### POST /recover/{userCred}
-
-- **Method:** `POST`
-- **Path:** `/recover/{userCred}`
-- **Authorization:** Not required
-- **Description:** Deprecated, use /recover2 with `recoveryId` instead. Initiates the account recovery process. This will delete all existing passkeys for the user and return registration options to create a new one.
-- **Query Parameters:**
-  - `userid` (required): The ID of the user to recover.
-- **Responses:**
-  - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialCreationOptionsJSON` object.
-  - `400 Bad Request`: The user credential is not valid.
-
-### POST /recover2/{recoveryId}
-
-- **Method:** `POST`
-- **Path:** `/recover2/{recoveryId}`
-- **Authorization:** Not required
-- **Description:** Initiates the account recovery process using a recovery ID. This will delete all existing passkeys for the user and return registration options to create a new one.
-- **Query Parameters:**
-  - `userid` (required): The ID of the user to recover.
-- **Responses:**
-  - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialCreationOptionsJSON` object.
-  - `400 Bad Request`: The recovery ID is not valid.
-
-### DELETE /user/{userId}/authenticator/{credentialId}
-
-- **Method:** `DELETE`
-- **Path:** `/user/{userId}/authenticator/{credentialId}`
-- **Authorization:** Required
-- **Description:** Deletes an authenticator.
-- **Responses:**
-  - `200 OK`: A `UserInfo` object. If this was the last authenticator, the user will be deleted and the response will indicate the user is not verified.
-  - `400 Bad Request`: The credential ID is not valid.
-  - `401 Unauthorized`: The request is not authorized.
 
 ## Client-Facing Data Models
 
@@ -231,7 +243,8 @@ The SimpleWebAuthn/server `PublicKeyCredentialRequestOptionsJSON` object contain
 ## Authorization
 
 Endpoints that require authorization expect a `__Host-JWT` cookie to be sent with the
-request. This cookie is issued by the `/verifyauth` and `/verifyreg` endpoints upon
-successful authentication and contains a JSON Web Token (JWT) for authorization. The
-JWT is valid for a limited time or until the `/endsess` endpoint is called which
-returns a `__Host-JWT` cookie without a JWT, ending a session immediately.
+request. This cookie is issued by the `POST /v1/users/{userid}/auth/verify` and
+`POST /v1/users/{userid}/reg/verify` upon successful authentication and contains
+a JSON Web Token (JWT) for authorization. The JWT is valid for a limited time or until
+the `DELETE /users/{userid}/session` is called which returns a `__Host-JWT` cookie
+without a JWT, ending a session immediately.
