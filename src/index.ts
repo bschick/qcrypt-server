@@ -98,7 +98,7 @@ type HandlerUser = {
 }
 
 type Response = {
-   content: string;
+   content: Record<string, any>;
    startSession?: VerifiedUserItem;
    endSession?: boolean;
 };
@@ -291,7 +291,7 @@ async function getUserSession(
 
    const responseContent = await makeLoginUserInfoResponse(verifiedUser, true, false);
    // do not start new session because auth was not provided
-   return { content: JSON.stringify(responseContent) };
+   return { content: responseContent };
 }
 
 
@@ -312,7 +312,7 @@ async function deleteUserSession(
    }).go();
 
    return {
-      content: JSON.stringify("bye"),
+      content: { message: "done" },
       endSession: true
    };
 }
@@ -468,7 +468,7 @@ async function postAuthVerify(
    recordEvent(EventNames.AuthVerify, unverifiedUser.userId, authenticator.data.credentialId);
 
    return {
-      content: JSON.stringify(responseContent),
+      content: responseContent,
       startSession: startSession
    };
 }
@@ -675,7 +675,7 @@ async function postRegVerify(
    recordEvent(EventNames.RegVerify, unverifiedUser.userId, verification.registrationInfo?.credential.id);
 
    return {
-      content: JSON.stringify(responseContent),
+      content: responseContent,
       startSession: startSession
    };
 }
@@ -733,7 +733,7 @@ async function getAuthOptions(
       // there could be none or multiple
       recordEvent(EventNames.AuthOptions, userId);
 
-      return { content: JSON.stringify(options) };
+      return { content: options };
 
    } catch (err) {
       console.error(err);
@@ -870,7 +870,7 @@ async function registrationOptions(
 
       // Let this happen async
       recordEvent(EventNames.RegOptions, unverifiedUser.userId);
-      return { content: JSON.stringify(options) };
+      return { content: options };
    } catch (err) {
       console.error(err);
       throw new Error('unable to generate registration options');
@@ -992,7 +992,7 @@ async function patchPasskey(
 
    // return with full UserInfo to make client side refresh simpler
    const response = await makeUserInfoResponse(verifiedUser, auths);
-   return { content: JSON.stringify(response) };
+   return { content: response };
 }
 
 
@@ -1031,7 +1031,7 @@ async function patchUserInfo(
    // return with full UserInfo to make client side refresh simpler
    verifiedUser['userName'] = userName;
    const response = await makeUserInfoResponse(verifiedUser);
-   return { content: JSON.stringify(response) };
+   return { content: response };
 }
 
 
@@ -1048,7 +1048,7 @@ async function getUserInfo(
    }
 
    const response = await makeUserInfoResponse(verifiedUser);
-   return { content: JSON.stringify(response) };
+   return { content: response };
 }
 
 // Not tracking events for this method since they are frequent and not particlyarly
@@ -1064,7 +1064,7 @@ async function getAuthenticators(
    }
 
    const response = await loadAuthenticators(verifiedUser);
-   return { content: JSON.stringify(response) };
+   return { content: response };
 }
 
 
@@ -1184,7 +1184,7 @@ async function deletePasskey(
       recordEvent(EventNames.RegDelete, verifiedUser.userId, credId);
    }
 
-   return { content: JSON.stringify(response) };
+   return { content: response };
 }
 
 // recover removes all existing passkeys, then initiates the
@@ -1401,10 +1401,10 @@ async function postLoadAAGUIDs(
       }
 
       const results = await AAGUIDs.put(batch).go();
-      return { content: 'success' };
+      return { content: { message: 'success' } };
    } catch (err) {
       console.error(err);
-      return { content: 'failed' };
+      return { content: { message: 'failed' } };
    }
 }
 
@@ -1439,7 +1439,7 @@ async function postCleanse(
       console.log('nothing to remove');
    }
 
-   return { content: 'done' };
+   return { content: { message: 'done' } };
 }
 
 async function postConsistency(
@@ -1567,7 +1567,7 @@ async function postConsistency(
       console.log(`${total} users found with ${leaked} leaked, ${deleted} deleted, and ${unverified} unverified`);
    }
 
-   return { content: "done" };
+   return { content: { message: "done" } };
 }
 
 async function postMunge(
@@ -1633,7 +1633,7 @@ async function postMunge(
    // }
 
    // console.log(`${total} users total`);
-   return { content: "done" };
+   return { content: { message: "done" } };
 }
 
 
@@ -1660,10 +1660,13 @@ function killCookie(): string {
    return '__Host-JWT=X; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=0';
 }
 
-async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
+async function createCookie(verifiedUser: VerifiedUserItem): Promise<[string, string]> {
    const jwtKey = await getJwtKey(verifiedUser);
+   const csrf = base64UrlEncode(crypto.getRandomValues(new Uint8Array(16)))!;
+
    const payload = {
-      pkId: verifiedUser.lastCredentialId
+      pkId: verifiedUser.lastCredentialId,
+      csrf: csrf
    };
 
    const expiresIn = 10800;
@@ -1676,12 +1679,14 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
    }
    );
 
-   return `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=${expiresIn}`
+   const cookie = `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=${expiresIn}`
+   return [cookie, csrf];
 }
 
 async function verifyCookie(
    unverifiedUser: UnverifiedUserItem,
-   cookie: string
+   cookie: string,
+   headerCsrf: string | undefined
 ): Promise<VerifiedUserItem> {
 
    const [name, token] = cookie.split('=');
@@ -1713,9 +1718,17 @@ async function verifyCookie(
    if (!payload ||
       !payload.pkId ||
       payload.pkId !== unverifiedUser.lastCredentialId ||
+      !payload.csrf ||
       payload.iss !== 'quickcrypt'
    ) {
       throw new AuthError();
+   }
+
+   // TODO: Remove this check for undefined headerCsrf after client-side cache expires
+   // This is a temporary measure for backward compatibility with clients that
+   // do not send the CSRF token header.
+   if (headerCsrf !== undefined && payload.csrf !== headerCsrf) {
+      throw new AuthError('invalid csrf token');
    }
 
    return checkVerified(unverifiedUser, unverifiedUser.userId);
@@ -1766,8 +1779,9 @@ async function handler(event: any, context: any) {
          if (!httpDetails.cookie || !unverifiedUser) {
             throw new AuthError();
          }
+         const headerCsrf = event['headers']['x-csrf-token'];
          // throws exception if invalid
-         verifiedUser = await verifyCookie(unverifiedUser, httpDetails.cookie);
+         verifiedUser = await verifyCookie(unverifiedUser, httpDetails.cookie, headerCsrf);
       }
 
       if (httpDetails.internal) {
@@ -1781,18 +1795,20 @@ async function handler(event: any, context: any) {
          }
       }
 
-      const response = await httpDetails.handler(httpDetails, {
+      let response = await httpDetails.handler(httpDetails, {
          verifiedUser: verifiedUser,
          unverifiedUser: unverifiedUser
       });
 
       let respCookie: string | undefined;
       if (response.startSession) {
-         respCookie = await createCookie(response.startSession);
+         const [cookie, csrf] = await createCookie(response.startSession);
+         respCookie = cookie;
+         response.content['csrf'] = csrf;
       } else if (response.endSession) {
          respCookie = killCookie();
       }
-      return makeResponse(response.content, 200, respCookie);
+      return makeResponse(JSON.stringify(response.content), 200, respCookie);
 
    } catch (err) {
       console.error(err);
