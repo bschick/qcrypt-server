@@ -11,7 +11,7 @@ This document provides documentation for the passkey-based authentication server
 - **Path:** `/v1/reg/options`
 - **Authorization:** Not required
 - **Description:** Start registration of a new user and returns registration options for creating a passkey.
-- **Request Body:** A JSON object with a `userName` key. Example: `{"userName": "new_user"}`. User name must greater than 5 and less than 32 characters.
+- **Request Body:** A JSON object with a `userName` key. Example: `{"userName": "New User"}`. User name must greater than 5 and less than 32 characters and may not contain HTML tags.
 - **Responses:**
   - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialCreationOptionsJSON` JSON object.
   - `400 Bad Request`: The request was malformed or the username is invalid.
@@ -52,7 +52,7 @@ This document provides documentation for the passkey-based authentication server
 - **Path:** `/v1/users/{userid}/auth/verify`
 - **Authorization:** Not required
 - **Description:** Verifies an authentication response from a client and established a new user session.
-- **Request Body:** The SimpleWebAuthn/client `AuthenticationResponseJSON` JSON object response & `challenge` created by client from previous GET `/v1/auth/options` response
+- **Request Body:** The SimpleWebAuthn/client `AuthenticationResponseJSON` JSON object response & `challenge` created by client from previous GET to `/v1/auth/options`.
 - **Query Parameters:**
   - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
   - `recovery` (optional, boolean): If `true`, the response will include the recovery id in `recoveryId`.
@@ -79,7 +79,7 @@ This document provides documentation for the passkey-based authentication server
 - **Method:** `POST`
 - **Path:** `/v1/users/{userid}/passkeys/verify`
 - **Authorization:** Not required
-- **Description:** Verifies a registration response from a client and creates a new passkey to the user account.
+- **Description:** Verifies a registration response from a client and adds a new passkey to the user account.
 - **Request Body:** The SimpleWebAuthn/client `RegistrationResponseJSON` JSON object response & `challenge` & `userId` created by client from previous POST to `/v1/users/{userid}/passkeys/options`.
 - **Query Parameters:**
   - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
@@ -92,10 +92,10 @@ This document provides documentation for the passkey-based authentication server
 ### PATCH /v1/users/{userid}/passkeys/{credid}
 
 - **Method:** `PATCH`
-- **Path:** `/v1/users/{userid}/passkeys/{credid}}`
+- **Path:** `/v1/users/{userid}/passkeys/{credid}`
 - **Authorization:** Required
 - **Description:** Updates the description of an passkey specified by `credid`.
-- **Request Body:** A JSON object with a `description` key. Example: `{"description": "My Yubikey"}`
+- **Request Body:** A JSON object with a `description` key. Example: `{"description": "My Yubikey"}`. Passkey description must greater than 5 and less than 43 characters and may not contain HTML tags.
 - **Responses:**
   - `200 OK`: A `UserInfo` JSON object.
   - `400 Bad Request`: The request was malformed or the description is invalid.
@@ -132,7 +132,7 @@ This document provides documentation for the passkey-based authentication server
 - **Path:** `/v1/users/{userid}`
 - **Authorization:** Required
 - **Description:** Updates the username of the user specified by `userid`.
-- **Request Body:** A JSON object with a `userName` key. Example: `{"userName": "Some Name"}`
+- **Request Body:** A JSON object with a `userName` key. Example: `{"userName": "Some Name"}`. User name must greater than 5 and less than 32 characters and may not contain HTML tags.
 - **Responses:**
   - `200 OK`: A `UserInfo` JSON object.
   - `400 Bad Request`: The request was malformed or the request body is invalid.
@@ -168,7 +168,7 @@ This document provides documentation for the passkey-based authentication server
 - **Authorization:** Required
 - **Description:** If a session exists and is valid, returns logged in information for `userid`.
 - **Responses:**
-  - `200 OK`: A `LoginUserInfo` JSON object including `userCed`.
+  - `200 OK`: A `LoginUserInfo` JSON object including `userCred`.
   - `400 Bad Request`: The request was malformed.
   - `401 Unauthorized`: The request is not authorized.
 
@@ -246,5 +246,5 @@ Endpoints that require authorization expect a `__Host-JWT` cookie to be sent wit
 request. This cookie is issued by the `POST /v1/users/{userid}/auth/verify` and
 `POST /v1/users/{userid}/reg/verify` upon successful authentication and contains
 a JSON Web Token (JWT) for authorization. The JWT is valid for a limited time or until
-the `DELETE /users/{userid}/session` is called which returns a `__Host-JWT` cookie
+the `DELETE /v1/users/{userid}/session` is called which returns a `__Host-JWT` cookie
 without a JWT, ending a session immediately.
