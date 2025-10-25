@@ -332,8 +332,9 @@ async function postAuthVerify(
    if (!body.response || !body.response.userHandle) {
       throw new ParamError('missing userHandle');
    }
-   if (resources.userid !== body.response.userHandle) {
-      throw new ParamError('userId mismatch');
+   // Temporarily, for backward compat allow no userid to be passed (remove this after clients update)
+   if (resources.userid && resources.userid !== body.response.userHandle) {
+      throw new ParamError('mismatched userId');
    }
    if (!validB64(body.id)) {
       throw new ParamError('invalid authenticatorId');
@@ -484,8 +485,9 @@ async function postRegVerify(
       resources,
    } = httpDetails;
 
-   if (resources.userid !== body.userId) {
-      throw new ParamError('userId mismatch');
+   // Temporarily, for backward compat allow no userid to be passed (remove this after clients update)
+   if (resources.userid && resources.userid !== body.userId) {
+      throw new ParamError('mismatched userId');
    }
    if (!validB64(body.challenge)) {
       throw new ParamError('invalid challenge format');
