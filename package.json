@@ -23,6 +23,7 @@
     "@simplewebauthn/server": "^13.0.0",
     "electrodb": "^3.4.0",
     "jsonwebtoken": "^9.0.2",
+    "urlpattern-polyfill": "^10.1.0",
     "xss": "^1.0.15"
   }
 }
