@@ -11,7 +11,7 @@ This `qcrypt-server` can built locally but currently is not setup to run locally
 - **Core Logic:** `src/index.ts` contains the main application logic and handler functions for API endpoints.
 - **URL Routing:** API URL routing is defined in `src/urls.ts`.
 - **Technology Stack:** It uses AWS KMS for cryptographic operations and ElectroDB for DynamoDB access.
-- **API:** The server exposes HTTPS endpoints, which are defined in the `METHODMAP` object in `src/index.ts`.
+- **API:** The server exposes HTTPS endpoints, which are defined in the `METHODMAP` object in `src/index.ts` and described in `API.md`
 
 ---
 
