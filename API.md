@@ -27,7 +27,7 @@ This document provides documentation for the passkey-based authentication server
   - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
   - `recovery` (optional, boolean): If `true`, the response will include the recovery id in `recoveryId`.
 - **Responses:**
-  - `200 OK`: A `LoginUserInfo` JSON object and session cookie.
+  - `200 OK`: A `LoginUserInfo` JSON object including `csrf` and session cookie.
   - `400 Bad Request`: The request was malformed or the request body is invalid.
   - `401 Unauthorized`: The registration challenge has expired or is invalid.
 
@@ -57,7 +57,7 @@ This document provides documentation for the passkey-based authentication server
   - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
   - `recovery` (optional, boolean): If `true`, the response will include the recovery id in `recoveryId`.
 - **Responses:**
-  - `200 OK`: A `LoginUserInfo` JSON object and session cookie.
+  - `200 OK`: A `LoginUserInfo` JSON object including `csrf` and session cookie.
   - `400 Bad Request`: The request was malformed or the request body is invalid.
   - `401 Unauthorized`: The authentication challenge has expired or is invalid.
 
@@ -168,7 +168,7 @@ This document provides documentation for the passkey-based authentication server
 - **Authorization:** Required
 - **Description:** If a session exists and is valid, returns logged in information for `userid`.
 - **Responses:**
-  - `200 OK`: A `LoginUserInfo` JSON object including `userCred`.
+  - `200 OK`: A `LoginUserInfo` JSON object including `userCred` and `csrf`.
   - `400 Bad Request`: The request was malformed.
   - `401 Unauthorized`: The request is not authorized.
 
@@ -206,7 +206,7 @@ The `LoginUserInfo` object extends the `UserInfo` object with additional informa
 - `pkId` (string, optional): The ID of the public key credential used for the last login.
 - `userCred` (string, optional): A user credential, only returned if requested.
 - `recoveryId` (string, optional): A recovery ID, only returned if requested.
-- `csrf` (string): A Cross-Site Request Forgery (CSRF) token that must be sent in the `x-csrf-token` header for all subsequent authorized requests.
+- `csrf` (string, optional): A Cross-Site Request Forgery (CSRF) token that must be sent in the `x-csrf-token` header for all subsequent authorized requests.
 
 ### AuthenticatorInfo
 
