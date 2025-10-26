@@ -48,6 +48,7 @@ export type HttpDetails = {
    body: Record<string, any>,
    handler: HttpHandler,
    version: Version,
+   checkCsrf: boolean,
    cookie?: string
 };
 
@@ -55,6 +56,7 @@ type HandlerInfo = {
    pattern: URLPattern,
    version: Version,
    authorize: boolean,
+   checkCsrf?: boolean,
    internal: boolean,
    handler: HttpHandler
 };
@@ -212,6 +214,7 @@ export function matchEvent(event: Record<string, any>, methodMap: MethodMap): Ht
             rpID: rpID,
             rpOrigin: rpOrigin,
             authorize: handerInfo.authorize,
+            checkCsrf: !(handerInfo.checkCsrf === false), // true or undefined make it required
             internal: handerInfo.internal,
             resources: match.pathname.groups,
             handler: handerInfo.handler,

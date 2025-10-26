@@ -101,6 +101,7 @@ type Response = {
    content: Record<string, any>;
    startSession?: VerifiedUserItem;
    endSession?: boolean;
+   returnCsrf?: boolean;
 };
 
 type AuthenticatorInfo = {
@@ -289,9 +290,16 @@ async function getUserSession(
       throw new AuthError();
    }
 
+   // TODO: This endpoint is the only way to get userCred and csrf token w/o
+   // (re)authentication, making it the weakest link in security. Should we force
+   // fresh tabs/windows to reauth?
    const responseContent = await makeLoginUserInfoResponse(verifiedUser, true, false);
-   // do not start new session because auth was not provided
-   return { content: responseContent };
+
+   // Return passed in csrf but don't start new session so that expiration is not reset
+   return {
+      content: responseContent,
+      returnCsrf: true
+   };
 }
 
 
@@ -473,9 +481,21 @@ async function postAuthVerify(
    };
 }
 
+async function postUserPasskeyVerify(
+   httpDetails: HttpDetails
+): Promise<Response> {
+   return _doPostRegVerify(httpDetails, false);
+}
 
 async function postRegVerify(
    httpDetails: HttpDetails
+): Promise<Response> {
+   return _doPostRegVerify(httpDetails, true);
+}
+
+async function _doPostRegVerify(
+   httpDetails: HttpDetails,
+   newSession: boolean
 ): Promise<Response> {
    const {
       rpID,
@@ -656,7 +676,7 @@ async function postRegVerify(
 
       // should now be verified
       const verifiedUser = checkVerified(unverifiedUser, body.userId);
-      startSession = verifiedUser;
+      startSession = newSession ? verifiedUser : undefined;
 
       const includeUserCred = !!params.usercred;
       const includeRecovery = !!params.recovery;
@@ -977,8 +997,8 @@ async function patchPasskey(
       if (!patched || !patched.data) {
          throw new ParamError('description update failed');
       }
-   } catch(err) {
-      if(err instanceof ElectroError) {
+   } catch (err) {
+      if (err instanceof ElectroError) {
          throw new ParamError('description update failed');
       }
       throw err;
@@ -1686,8 +1706,9 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<[string, st
 async function verifyCookie(
    unverifiedUser: UnverifiedUserItem,
    cookie: string,
+   checkCsrf: boolean,
    headerCsrf: string | undefined
-): Promise<VerifiedUserItem> {
+): Promise<[VerifiedUserItem, string]> {
 
    const [name, token] = cookie.split('=');
    if (name !== '__Host-JWT' || token === undefined || token.length < 10) {
@@ -1726,12 +1747,14 @@ async function verifyCookie(
 
    // TODO: Remove this check for undefined headerCsrf after client-side cache expires
    // This is a temporary measure for backward compatibility with clients that
-   // do not send the CSRF token header.
-   if (headerCsrf !== undefined && payload.csrf !== headerCsrf) {
+   // do not send the CSRF token header. Change to:
+   // if (checkCsrf && (payload.csrf !== headerCsrf || !headerCsrf)) {
+   if (checkCsrf && headerCsrf !== undefined && payload.csrf !== headerCsrf) {
       throw new AuthError('invalid csrf token');
    }
 
-   return checkVerified(unverifiedUser, unverifiedUser.userId);
+   const verifiedUser = checkVerified(unverifiedUser, unverifiedUser.userId);
+   return [verifiedUser, payload.csrf];
 }
 
 
@@ -1757,7 +1780,6 @@ async function handler(event: any, context: any) {
    // Uncomment for temporary debuging only, since this logs user credentials
    // console.log(event);
 
-
    try {
       const httpDetails = matchEvent(event, METHODMAP);
 
@@ -1770,6 +1792,7 @@ async function handler(event: any, context: any) {
 
       let unverifiedUser: UnverifiedUserItem | undefined;
       let verifiedUser: VerifiedUserItem | undefined;
+      let cookieCsrf: string | undefined;
 
       if (httpDetails.resources.userid) {
          unverifiedUser = await getUnverifiedUser(httpDetails.resources.userid);
@@ -1780,14 +1803,19 @@ async function handler(event: any, context: any) {
             throw new AuthError();
          }
          const headerCsrf = event['headers']['x-csrf-token'];
-         // throws exception if invalid
-         verifiedUser = await verifyCookie(unverifiedUser, httpDetails.cookie, headerCsrf);
+         // throws an exception if cookie or headerCsrf token is invalid
+         [verifiedUser, cookieCsrf] = await verifyCookie(
+            unverifiedUser,
+            httpDetails.cookie,
+            httpDetails.checkCsrf,
+            headerCsrf
+         );
       }
 
       if (httpDetails.internal) {
          let dbytes: Uint8Array | undefined = undefined;
          try {
-            dbytes = await decryptField(httpDetails.params.testkey, {purpose: 'internal'}, INTERNAL_PHRASE.length);
+            dbytes = await decryptField(httpDetails.params.testkey, { purpose: 'internal' }, INTERNAL_PHRASE.length);
          } finally {
             if (!dbytes || new TextDecoder().decode(dbytes) !== INTERNAL_PHRASE) {
                throw new AuthError();
@@ -1807,6 +1835,8 @@ async function handler(event: any, context: any) {
          response.content['csrf'] = csrf;
       } else if (response.endSession) {
          respCookie = killCookie();
+      } else if (response.returnCsrf) {
+         response.content['csrf'] = cookieCsrf;
       }
       return makeResponse(JSON.stringify(response.content), 200, respCookie);
 
@@ -1830,8 +1860,10 @@ const METHODMAP: MethodMap = {
    GET: [
       { pattern: Patterns.authOptions, version: 1, authorize: false, internal: false, handler: getAuthOptions },
       { pattern: Patterns.userInfo, version: 1, authorize: true, internal: false, handler: getUserInfo },
-      { pattern: Patterns.userSession, version: 1, authorize: true, internal: false, handler: getUserSession },
       { pattern: Patterns.userPasskeyOptions, version: 1, authorize: true, internal: false, handler: getPasskeyOptions },
+      // Special case of an authenticated method that does not require csrf. Needed so GET session work in a fresh
+      // tab/window, and should be safe since csrf isn't technically needed for any GET call due to same-origin
+      { pattern: Patterns.userSession, version: 1, authorize: true, checkCsrf: false, internal: false, handler: getUserSession },
 
       { pattern: OldPatterns.authOptions, version: 1, authorize: false, internal: false, handler: getAuthOptions },
       { pattern: OldPatterns.userInfo, version: 1, authorize: true, internal: false, handler: getUserInfo },
@@ -1842,7 +1874,7 @@ const METHODMAP: MethodMap = {
       { pattern: Patterns.regVerify, version: 1, authorize: false, internal: false, handler: postRegVerify },
       { pattern: Patterns.userRecover, version: 1, authorize: false, internal: false, handler: postRecover },
       { pattern: Patterns.userRecover2, version: 1, authorize: false, internal: false, handler: postRecover2 },
-      { pattern: Patterns.userPasskeyVerify, version: 1, authorize: false, internal: false, handler: postRegVerify },
+      { pattern: Patterns.userPasskeyVerify, version: 1, authorize: false, internal: false, handler: postUserPasskeyVerify },
 
       { pattern: Patterns.munge, version: 1, authorize: false, internal: true, handler: postMunge },
       { pattern: Patterns.consistency, version: 1, authorize: false, internal: true, handler: postConsistency },
