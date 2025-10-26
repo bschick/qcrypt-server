@@ -45,7 +45,7 @@ This `qcrypt-server` can built locally but currently is not setup to run locally
 You can either create a separate dev/test environment for `qcrypt-server`, as described below, or use an existing environment created for the `qcrypt` frontend. The requirements for a frontend environment are a superset of those for a backend setup. When re-using an existing setup, you can skip all the steps below except the code checkout and then run `npm install` within the directory.
 
 - Create an Ubuntu 24.04 (or similar) VM
-- (Optional) Setup an LXC container to make version testing easier by logging into the Ubuntu VM as a user with sudo permission and run the following:
+- (Optional) Setup an LXC container to simplify version testing by logging into the Ubuntu VM as a user with sudo permission and run the following:
 ```bash
 sudo sudo snap install lxd
 sudo adduser $USER lxd
