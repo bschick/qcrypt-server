@@ -4,7 +4,9 @@ This document provides instructions for AI agents working on the `qcrypt-server`
 
 ## 1. Project Overview
 
-`qcrypt-server` is the backend for Quick Crypt, a service that handles user authentication, passkey (WebAuthn) registration, and account recovery workflows.
+`qcrypt-server` is the backend API server for Quick Crypt, a service that handles user authentication, passkey (WebAuthn) registration, and account recovery workflows.
+
+This `qcrypt-server` can built locally but currently is not setup to run locally and must be depoloyed to AWS for testing and production. Separate test and production instances are deployed in AWS. Deployment to AWS is not yet well documented. The vast majority of dev/test work should be against the test server `https://test.quickcrypt.org`.
 
 - **Core Logic:** `src/index.ts` contains the main application logic and endpoint definitions.
 - **Technology Stack:** It uses AWS KMS for cryptographic operations and ElectroDB for DynamoDB access.
@@ -36,10 +38,27 @@ This document provides instructions for AI agents working on the `qcrypt-server`
 
 ## 4. Developer Workflows
 
-### a. Initial Setup
-To set up the development environment, run:
+### a. One-time Setup of Dev/Test Environment
+
+You can either create a separate dev/test environment for `qcrypt-server`, as described below, or use an existing environment created for the `qcrypt` frontend. The requirements for a frontend environment are a superset of those for a backend setup. When re-using an existing setup, you can skip all the steps below except the code checkout and then run `npm install` within the directory.
+
+- Create an Ubuntu 24.04 (or similar) VM
+- (Optional) Setup an LXC container to make version testing easier by logging into the Ubuntu VM as a user with sudo permission and run the following:
 ```bash
-npm install
+sudo sudo snap install lxd
+sudo adduser $USER lxd
+newgrp lxd
+lxd init --auto
+lxc launch ubuntu:24.04 qcrypt
+lxc exec qcrypt -- /bin/bash
+```
+- Log into either the LXC container (exec above) or the Ubuntu VM as a user with sudo permission and run the following:
+```bash
+sudo apt update && sudo apt dist-upgrade -y
+sudo apt install -y git ca-certificates
+cd ~
+git clone https://github.com/bschick/qcrypt-server.git && cd qcrypt-server
+./ubsetup.sh
 ```
 
 ### b. Building the Project
@@ -54,34 +73,19 @@ npm run buildmin
 The output will be placed in the `build/` directory.
 
 ### c. Deployment
-The `build/` directory will contain `index.js` and `index.zip`. To deploy, upload `index.zip` to the appropriate AWS Lambda function.
+The `build/` directory will contain `index.js` and `index.zip`. To deploy, upload `index.zip` to the appropriate AWS Lambda function. This may be documented in detail later.
 
 ### d. Testing
-Unit and integration tests for this backend are managed in the main web application repository, available at:
-[https://github.com/bschick/qcrypt/tree/main/tests](https://github.com/bschick/qcrypt/tree/main/tests)
+Unit and end-to-end tests for this API backend are done through the client-side web application [qcrypt github](https://github.com/bschick/qcrypt). See the [AGENTS.md file](https://raw.githubusercontent.com/bschick/qcrypt/refs/heads/main/AGENTS.md) for test execution instructions.
 
-When adding or modifying an endpoint, ensure you add corresponding tests in the `qcrypt` repository to prevent regressions.
+When adding or modifying an endpoint, you must also add corresponding tests in the `qcrypt` repository.
 
 ---
 
 ## 5. Programmatic Checks
 
-Before submitting any changes, run the following end-to-end tests from the `qcrypt` repository to ensure that the backend is working correctly with the client.
+Before submitting any changes, you must run the test suites described in section #4 and #5 in the [AGENTS.md file](https://raw.githubusercontent.com/bschick/qcrypt/refs/heads/main/AGENTS.md) of the `qcrypt` frontend to ensure that the backend is working correctly with the client.
 
-### a. End-to-End Tests
-These commands run the full suite of Playwright tests. Use `ete` for testing against a local server and `ete:prod` for production.
-
-**From the `qcrypt` (client) repository:**
-
-For local testing:
-```bash
-npm run ete
-```
-
-For production testing:
-```bash
-npm run ete:prod
-```
 
 ---
 
@@ -92,8 +96,8 @@ npm run ete:prod
 - **Database Updates:** Use the `.patch().set({...}).go()` pattern for updating records in DynamoDB.
 - **Security:** Never store plaintext secrets. Credentials and recovery IDs must be encrypted before being stored.
 - **Error Handling:** Use the custom `ParamError` and `AuthError` classes from `src/utils.ts` for handling errors gracefully.
-- **Asynchronous Operations:** Use Node.js's `setTimeout` from `timers/promises` for all timeouts and delays.
-
+- **Github workflow:** All changes must be submitted as a github pull request from a cloned repository.
+- **AWS server resources:** The test API server at `https://test.quickcrypt.org` is intended only for those contributing to the Quick Crypt project. Unnecessary or excessive usage that drives up AWS costs will be blocked.
 ---
 
 ## 7. API Endpoints
