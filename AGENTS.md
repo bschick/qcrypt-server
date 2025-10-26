@@ -6,7 +6,7 @@ This document provides instructions for AI agents working on the `qcrypt-server`
 
 `qcrypt-server` is the backend API server for Quick Crypt, a service that handles user authentication, passkey (WebAuthn) registration, and account recovery workflows.
 
-This `qcrypt-server` can built locally but currently is not setup to run locally and must be depoloyed to AWS for testing and production. Separate test and production instances are deployed in AWS. Deployment to AWS is not yet well documented. The vast majority of dev/test work should be against the test server `https://test.quickcrypt.org`.
+This `qcrypt-server` can be built locally but currently is not setup to run locally and must be depoloyed to AWS for testing and production. Separate test and production instances are deployed in AWS. Deployment to AWS is not yet well documented. The vast majority of dev/test work should be against the test server `https://test.quickcrypt.org`.
 
 - **Core Logic:** `src/index.ts` contains the main application logic and handler functions for API endpoints.
 - **URL Routing:** API URL routing is defined in `src/urls.ts`.
