@@ -18,7 +18,7 @@ This `qcrypt-server` can be built locally but currently is not setup to run loca
 ## 2. Architecture and Data Flow
 
 - **Data Models:** All database entities (`User`, `Authenticator`, `Challenge`, `AuthEvent`, `AAGUID`) are defined in `src/models.ts`. These models are used for all database operations.
-- **Authentication:** The server uses the [SimpleWebAuthn](https://github.com/MasterKale/SimpleWebAuthn) library to handle WebAuthn registration and authentication flows.
+- **Authentication:** The server uses the SimpleWebAuthn library to handle WebAuthn registration and authentication flows.
 - **Cryptography:** All sensitive data is encrypted using AWS KMS. The AWS SDK is used for all cryptographic operations.
 - **Database:** User and credential data is stored in DynamoDB, accessed via the ElectroDB models.
 - **Static Assets:** Authenticator images and metadata are located in `assets/aaguid/img/` and `assets/combined_aaguid.json`.
@@ -44,7 +44,7 @@ This `qcrypt-server` can be built locally but currently is not setup to run loca
 
 You can either create a separate dev/test environment for `qcrypt-server`, as described below, or use an existing environment created for the `qcrypt` frontend. The requirements for a frontend environment are a superset of those for a backend setup. When re-using an existing setup, you can skip all the steps below except the code checkout and then run `npm install` within the directory.
 
-- Create an Ubuntu 24.04 (or similar) VM
+- Create an up-to-date Ubuntu 24.04 (or similar) VM
 - (Optional) Setup an LXC container to simplify version testing by logging into the Ubuntu VM as a user with sudo permission and run the following:
 ```bash
 sudo sudo snap install lxd
