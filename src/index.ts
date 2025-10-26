@@ -1658,7 +1658,7 @@ async function postMunge(
 
 
 // User may be verified or unverified
-async function getJwtKey(user: UnverifiedUserItem): Promise<Buffer> {
+async function getSessionKey(user: UnverifiedUserItem, purpose: string): Promise<Buffer> {
    if (!jwtMaterial) {
       jwtMaterial = await setupJwtMaterial();
    }
@@ -1671,7 +1671,7 @@ async function getJwtKey(user: UnverifiedUserItem): Promise<Buffer> {
       'sha512',
       combined,
       salt,
-      "jwt_key" + user.authCount,
+      purpose + user.authCount,
       32
    ));
 }
@@ -1680,13 +1680,24 @@ function killCookie(): string {
    return '__Host-JWT=X; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=0';
 }
 
-async function createCookie(verifiedUser: VerifiedUserItem): Promise<[string, string]> {
-   const jwtKey = await getJwtKey(verifiedUser);
-   const csrf = base64UrlEncode(crypto.getRandomValues(new Uint8Array(16)))!;
+async function createCsrf(verifiedUser: VerifiedUserItem): Promise<string> {
+   if (!verifiedUser) {
+      throw new AuthError();
+   }
+
+   const csrfBytes = await getSessionKey(verifiedUser, "csrf");
+   return base64UrlEncode(csrfBytes)!;
+}
+
+async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
+   if (!verifiedUser) {
+      throw new AuthError();
+   }
+
+   const jwtKey = await getSessionKey(verifiedUser, "jwt_key");
 
    const payload = {
-      pkId: verifiedUser.lastCredentialId,
-      csrf: csrf
+      pkId: verifiedUser.lastCredentialId
    };
 
    const expiresIn = 10800;
@@ -1700,22 +1711,36 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<[string, st
    );
 
    const cookie = `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=${expiresIn}`
-   return [cookie, csrf];
+   return cookie;
+}
+
+async function verifyCsrf(
+   verifiedUser: VerifiedUserItem,
+   checkCsrf: boolean,
+   headerCsrf: string | undefined
+) {
+   const serverCsrf = await createCsrf(verifiedUser);
+
+   // TODO: Remove this check for undefined headerCsrf after client-side cache expires
+   // This is a temporary measure for backward compatibility with clients that
+   // do not send the CSRF token header. Change to:
+   // if (checkCsrf && (serverCsrf !== headerCsrf || !headerCsrf)) {
+   if (checkCsrf && headerCsrf !== undefined && serverCsrf !== headerCsrf) {
+      throw new AuthError('invalid csrf token');
+   }
 }
 
 async function verifyCookie(
    unverifiedUser: UnverifiedUserItem,
-   cookie: string,
-   checkCsrf: boolean,
-   headerCsrf: string | undefined
-): Promise<[VerifiedUserItem, string]> {
+   cookie: string
+): Promise<VerifiedUserItem> {
 
    const [name, token] = cookie.split('=');
    if (name !== '__Host-JWT' || token === undefined || token.length < 10) {
       throw new AuthError();
    }
 
-   const jwtKey = await getJwtKey(unverifiedUser);
+   const jwtKey = await getSessionKey(unverifiedUser, "jwt_key");
    let payload: JwtPayload;
 
    // Uncomment for temporary debuging only, since this logs user credentials
@@ -1739,22 +1764,12 @@ async function verifyCookie(
    if (!payload ||
       !payload.pkId ||
       payload.pkId !== unverifiedUser.lastCredentialId ||
-      !payload.csrf ||
       payload.iss !== 'quickcrypt'
    ) {
       throw new AuthError();
    }
 
-   // TODO: Remove this check for undefined headerCsrf after client-side cache expires
-   // This is a temporary measure for backward compatibility with clients that
-   // do not send the CSRF token header. Change to:
-   // if (checkCsrf && (payload.csrf !== headerCsrf || !headerCsrf)) {
-   if (checkCsrf && headerCsrf !== undefined && payload.csrf !== headerCsrf) {
-      throw new AuthError('invalid csrf token');
-   }
-
-   const verifiedUser = checkVerified(unverifiedUser, unverifiedUser.userId);
-   return [verifiedUser, payload.csrf];
+   return checkVerified(unverifiedUser, unverifiedUser.userId);
 }
 
 
@@ -1792,7 +1807,6 @@ async function handler(event: any, context: any) {
 
       let unverifiedUser: UnverifiedUserItem | undefined;
       let verifiedUser: VerifiedUserItem | undefined;
-      let cookieCsrf: string | undefined;
 
       if (httpDetails.resources.userid) {
          unverifiedUser = await getUnverifiedUser(httpDetails.resources.userid);
@@ -1803,13 +1817,10 @@ async function handler(event: any, context: any) {
             throw new AuthError();
          }
          const headerCsrf = event['headers']['x-csrf-token'];
-         // throws an exception if cookie or headerCsrf token is invalid
-         [verifiedUser, cookieCsrf] = await verifyCookie(
-            unverifiedUser,
-            httpDetails.cookie,
-            httpDetails.checkCsrf,
-            headerCsrf
-         );
+
+         // these throw an exception if cookie or headerCsrf is invalid
+         verifiedUser = await verifyCookie(unverifiedUser, httpDetails.cookie);
+         await verifyCsrf(verifiedUser, httpDetails.checkCsrf, headerCsrf);
       }
 
       if (httpDetails.internal) {
@@ -1830,13 +1841,12 @@ async function handler(event: any, context: any) {
 
       let respCookie: string | undefined;
       if (response.startSession) {
-         const [cookie, csrf] = await createCookie(response.startSession);
-         respCookie = cookie;
-         response.content['csrf'] = csrf;
+         respCookie = await createCookie(response.startSession);
+         response.content['csrf'] = await createCsrf(response.startSession);
       } else if (response.endSession) {
          respCookie = killCookie();
       } else if (response.returnCsrf) {
-         response.content['csrf'] = cookieCsrf;
+         response.content['csrf'] = await createCsrf(verifiedUser!);
       }
       return makeResponse(JSON.stringify(response.content), 200, respCookie);
 
@@ -1861,8 +1871,8 @@ const METHODMAP: MethodMap = {
       { pattern: Patterns.authOptions, version: 1, authorize: false, internal: false, handler: getAuthOptions },
       { pattern: Patterns.userInfo, version: 1, authorize: true, internal: false, handler: getUserInfo },
       { pattern: Patterns.userPasskeyOptions, version: 1, authorize: true, internal: false, handler: getPasskeyOptions },
-      // Special case of an authenticated method that does not require csrf. Needed so GET session work in a fresh
-      // tab/window, and should be safe since csrf isn't technically needed for any GET call due to same-origin
+      // Special case of an authenticated method that does not require csrf. Needed so GET session works in a fresh
+      // tab/window, and should be safe since csrf isn't technically needed for GET calls due to Same-Origin
       { pattern: Patterns.userSession, version: 1, authorize: true, checkCsrf: false, internal: false, handler: getUserSession },
 
       { pattern: OldPatterns.authOptions, version: 1, authorize: false, internal: false, handler: getAuthOptions },
