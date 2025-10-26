@@ -6,9 +6,10 @@ This document provides instructions for AI agents working on the `qcrypt-server`
 
 `qcrypt-server` is the backend for Quick Crypt, a service that handles user authentication, passkey (WebAuthn) registration, and account recovery workflows.
 
-- **Core Logic:** `src/index.ts` contains the main application logic and endpoint definitions.
+- **Core Logic:** `src/index.ts` contains the main application logic and handler functions for API endpoints.
+- **URL Routing:** API URL routing is defined in `src/urls.ts`.
 - **Technology Stack:** It uses AWS KMS for cryptographic operations and ElectroDB for DynamoDB access.
-- **API:** The server exposes HTTPS endpoints, which are defined in the `FUNCTIONS` object in `src/index.ts`.
+- **API:** The server exposes HTTPS endpoints, which are defined in the `METHODMAP` object in `src/index.ts`.
 
 ---
 
@@ -24,9 +25,10 @@ This document provides instructions for AI agents working on the `qcrypt-server`
 
 ## 3. Important Files & Directories
 
-- `src/index.ts`: The main file containing all API endpoint logic and routing.
+- `src/index.ts`: The main file containing all API endpoint logic and handler functions.
+- `src/urls.ts`: Defines the URL patterns and routing for all API endpoints.
 - `src/models.ts`: Defines the ElectroDB models for all DynamoDB tables.
-- `src/utils.ts`: Contains utility functions and custom error classes (`ParamError`, `AuthError`).
+- `src/utils.ts`: Contains utility functions and custom error classes (`ParamError`, `AuthError`, `NotFoundError`).
 - `src/nonce/`: **Note:** This directory contains a backup of a separate AWS Lambda function and is not used by this project directly.
 - `package.json`: Lists project dependencies and available npm scripts.
 - `API.md`: Detailed documentation for all API endpoints, including request/response formats.
@@ -100,16 +102,16 @@ npm run ete:prod
 
 A summary of the main HTTPS API endpoints is provided below. For detailed information on request/response formats and data models, see `API.md`.
 
-- `POST /userreg`: Register a new user.
-- `POST /user/{userId}/passkeyreg`: Add a new passkey to an existing user.
-- `POST /verifyreg`: Verify a passkey registration response.
-- `GET /authoptions`: Get authentication options for a user.
-- `POST /verifyauth`: Verify an authentication response.
-- `POST /user/{userId}/verifysess`: Verify a user's session.
-- `POST /user/{userId}/endsess`: End a user's session.
-- `GET /user/{userId}/authenticators`: List a user's authenticators.
-- `GET /user/{userId}/userinfo`: Get user information.
-- `PUT /user/{userId}/description/{credentialId}`: Update an authenticator's description.
-- `PUT /user/{userId}/username`: Update a username.
-- `POST /recover2/{recoveryId}`: Initiate account recovery.
-- `DELETE /user/{userId}/authenticator/{credentialId}`: Delete an authenticator.
+- `POST /v1/reg/options`: Start registration of a new user.
+- `POST /v1/users/{userid}/reg/verify`: Verify a passkey registration response.
+- `GET /v1/auth/options`: Get authentication options for a user.
+- `POST /v1/users/{userid}/auth/verify`: Verify an authentication response.
+- `GET /v1/users/{userid}/passkeys/options`: Get registration options to add a new passkey to an existing user.
+- `POST /v1/users/{userid}/passkeys/verify`: Verify a passkey registration response for an existing user.
+- `PATCH /v1/users/{userid}/passkeys/{credid}`: Update an authenticator's description.
+- `DELETE /v1/users/{userid}/passkeys/{credid}`: Delete an authenticator.
+- `GET /v1/users/{userid}`: Get user information.
+- `PATCH /v1/users/{userid}`: Update a username.
+- `POST /v1/users/{userid}/recover2/{recoveryid}`: Initiate account recovery.
+- `GET /v1/users/{userid}/session`: Get a user's session information.
+- `DELETE /v1/users/{userid}/session`: End a user's session.
