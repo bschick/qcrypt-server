@@ -231,7 +231,7 @@ async function decryptField(
 
    const result = await kmsClient.send(dec);
    if (!result.Plaintext || result.Plaintext.byteLength != expectedBytes) {
-      throw new Error('field decryption failed, context:', context);
+      throw new Error('field decryption failed');
    }
 
    return result.Plaintext!;
@@ -1735,10 +1735,11 @@ async function verifyCookie(
    cookie: string
 ): Promise<VerifiedUserItem> {
 
-   const [name, token] = cookie.split('=');
-   if (name !== '__Host-JWT' || token === undefined || token.length < 10) {
+   const match = /^__Host-JWT=(.+)$/.exec(cookie);
+   if (!match || !match[1] || match[1].length < 10) {
       throw new AuthError();
    }
+   const token = match[1];
 
    const jwtKey = await getSessionKey(unverifiedUser, "jwt_key");
    let payload: JwtPayload;
