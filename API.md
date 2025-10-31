@@ -21,7 +21,7 @@ This document provides documentation for the passkey-based authentication server
 - **Method:** `POST`
 - **Path:** `/v1/users/{userid}/reg/verify`
 - **Authorization:** Not required
-- **Description:** Verifies a registration response from a client, creating a new user and passkey.
+- **Description:** Verifies a registration response from a client, creating a new user and passkey. Response contains a `csrf` token that must be sent in the `x-csrf-token` header for authorized requests.
 - **Request Body:** The SimpleWebAuthn/client `RegistrationResponseJSON` JSON object response & `challenge` & `userId` created by client from previous POST to `/v1/reg/options`.
 - **Query Parameters:**
   - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
@@ -51,7 +51,7 @@ This document provides documentation for the passkey-based authentication server
 - **Method:** `POST`
 - **Path:** `/v1/users/{userid}/auth/verify`
 - **Authorization:** Not required
-- **Description:** Verifies an authentication response from a client and established a new user session.
+- **Description:** Verifies an authentication response from a client and established a new user session. Response contains a `csrf` token that must be sent in a `x-csrf-token` header for authorized requests.
 - **Request Body:** The SimpleWebAuthn/client `AuthenticationResponseJSON` JSON object response & `challenge` created by client from previous GET to `/v1/auth/options`.
 - **Query Parameters:**
   - `usercred` (optional, boolean): If `true`, the response will include the user credential in `userCred`.
@@ -68,7 +68,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `GET`
 - **Path:** `/v1/users/{userid}/passkeys/options`
-- **Authorization:** Required
+- **Authorization:** Required (cookie and x-csrf-token)
 - **Description:** Returns registration options for adding a new passkey to an existing user account.
 - **Responses:**
   - `200 OK`: A SimpleWebAuthn/server `PublicKeyCredentialCreationOptionsJSON` JSON object.
@@ -93,7 +93,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `PATCH`
 - **Path:** `/v1/users/{userid}/passkeys/{credid}`
-- **Authorization:** Required
+- **Authorization:** Required (cookie and x-csrf-token)
 - **Description:** Updates the description of an passkey specified by `credid`.
 - **Request Body:** A JSON object with a `description` key. Example: `{"description": "My Yubikey"}`. Passkey description must greater than 5 and less than 43 characters and may not contain HTML tags.
 - **Responses:**
@@ -105,7 +105,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `DELETE`
 - **Path:** `/v1/users/{userid}/passkeys/{credid}`
-- **Authorization:** Required
+- **Authorization:** Required (cookie and x-csrf-token)
 - **Description:** Deletes an passkey specified by `credid`.
 - **Responses:**
   - `200 OK`: A `UserInfo` JSON object. If this was the last passkey, the entire user account will be deleted and the response will indicate the user is not verified.
@@ -119,7 +119,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `GET`
 - **Path:** `/v1/users/{userid}`
-- **Authorization:** Required
+- **Authorization:** Required (cookie and x-csrf-token)
 - **Description:** Retrieves information about the user specified by `userid`.
 - **Responses:**
   - `200 OK`: A `UserInfo` JSON object.
@@ -130,7 +130,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `PATCH`
 - **Path:** `/v1/users/{userid}`
-- **Authorization:** Required
+- **Authorization:** Required (cookie and x-csrf-token)
 - **Description:** Updates the username of the user specified by `userid`.
 - **Request Body:** A JSON object with a `userName` key. Example: `{"userName": "Some Name"}`. User name must greater than 5 and less than 32 characters and may not contain HTML tags.
 - **Responses:**
@@ -165,8 +165,8 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `GET`
 - **Path:** `/v1/users/{userid}/session`
-- **Authorization:** Required
-- **Description:** If a session exists and is valid, returns logged in information for `userid`.
+- **Authorization:** Required (cookie only)
+- **Description:** If a session exists and is valid, returns logged in information for `userid` which includes a `csrf` token that must be sent in a `x-csrf-token` header for all other authorized requests.
 - **Responses:**
   - `200 OK`: A `LoginUserInfo` JSON object including `userCred` and `csrf`.
   - `400 Bad Request`: The request was malformed.
@@ -176,7 +176,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `DELETE`
 - **Path:** `/v1/users/{userid}/session`
-- **Authorization:** Required
+- **Authorization:** Required (cookie and x-csrf-token)
 - **Description:** Ends the current session and invalidates the session cookie.
 - **Responses:**
   - `200 OK`: A JSON object with a `message` key and a value of "done", along with an expired session cookie.
@@ -206,7 +206,7 @@ The `LoginUserInfo` object extends the `UserInfo` object with additional informa
 - `pkId` (string, optional): The ID of the public key credential used for the last login.
 - `userCred` (string, optional): A user credential, only returned if requested.
 - `recoveryId` (string, optional): A recovery ID, only returned if requested.
-- `csrf` (string, optional): A Cross-Site Request Forgery (CSRF) token that must be sent in the `x-csrf-token` header for all subsequent authorized requests.
+- `csrf` (string, optional): A Cross-Site Request Forgery (CSRF) token that must be sent in a `x-csrf-token` header for authorized requests.
 
 ### AuthenticatorInfo
 
@@ -243,9 +243,4 @@ The SimpleWebAuthn/server `PublicKeyCredentialRequestOptionsJSON` object contain
 
 ## Authorization
 
-Endpoints that require authorization expect a `__Host-JWT` cookie to be sent with the
-request. This cookie is issued by the `POST /v1/users/{userid}/auth/verify` and
-`POST /v1/users/{userid}/reg/verify` upon successful authentication and contains
-a JSON Web Token (JWT) for authorization. The JWT is valid for a limited time or until
-the `DELETE /v1/users/{userid}/session` is called which returns a `__Host-JWT` cookie
-without a JWT, ending a session immediately.
+Endpoints that require authorization expect both a `__Host-JWT` cookie and a `x-csrf-token` header to be sent with the request. The cookie and token are issued by the `POST /v1/users/{userid}/auth/verify` and `POST /v1/users/{userid}/reg/verify` endpoints upon successful authentication. Once a session cookie is obtained, the `csrf` token is also returned by the `GET /v1/users/{userid}/session` endpoint. The cookie contains a JSON Web Token (JWT) for authorization. The JWT is valid for a limited time or until `DELETE /v1/users/{userid}/session` is called which returns a `__Host-JWT` cookie without a JWT, ending a session and invalidating the `csrf` token immediately.
