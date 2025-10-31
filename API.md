@@ -177,7 +177,7 @@ This document provides documentation for the passkey-based authentication server
 - **Method:** `DELETE`
 - **Path:** `/v1/users/{userid}/session`
 - **Authorization:** Required (cookie and x-csrf-token)
-- **Description:** Ends the current session and invalidates the session cookie.
+- **Description:** Ends the current session and invalidates the session cookie and csrf token. Sessions will expire automatically, this endpoint is only needed to force early termination.
 - **Responses:**
   - `200 OK`: A JSON object with a `message` key and a value of "done", along with an expired session cookie.
   - `400 Bad Request`: The request was malformed.
