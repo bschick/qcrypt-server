@@ -4,4 +4,4 @@ Server side logic for Quick Crypt web application.
 
 [Live Site](https://quickcrypt.org)
 <br />
-[Server Repository](https://github.com/bschick/qcrypt-server)
+[Client Repository](https://github.com/bschick/qcrypt)
