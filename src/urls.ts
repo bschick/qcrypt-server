@@ -28,9 +28,9 @@ if (!globalThis.URLPattern) {
 }
 
 export type QParams = Record<string, string>;
-
+export const INTERNAL_VERSION = 0;
 export type Method = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-export type Version = 1;
+export type Version = typeof INTERNAL_VERSION | 1;
 
 type HttpHandler = (
    httpDetails: HttpDetails,
@@ -42,7 +42,6 @@ export type HttpDetails = {
    rpID: string,
    rpOrigin: string,
    authorize: boolean,
-   internal: boolean,
    resources: Record<string, any>,
    params: QParams,
    body: Record<string, any>,
@@ -57,7 +56,6 @@ type HandlerInfo = {
    version: Version,
    authorize: boolean,
    checkCsrf?: boolean,
-   internal: boolean,
    handler: HttpHandler
 };
 
@@ -215,7 +213,6 @@ export function matchEvent(event: Record<string, any>, methodMap: MethodMap): Ht
             rpOrigin: rpOrigin,
             authorize: handerInfo.authorize,
             checkCsrf: !(handerInfo.checkCsrf === false), // true or undefined make it required
-            internal: handerInfo.internal,
             resources: match.pathname.groups,
             handler: handerInfo.handler,
             version: handerInfo.version,
