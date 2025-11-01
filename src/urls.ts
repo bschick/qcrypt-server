@@ -38,7 +38,8 @@ type HttpHandler = (
 ) => any
 
 export type HttpDetails = {
-   method: string,
+   name: string,
+   method: Method,
    rpID: string,
    rpOrigin: string,
    authorize: boolean,
@@ -52,6 +53,7 @@ export type HttpDetails = {
 };
 
 type HandlerInfo = {
+   name: string,
    pattern: URLPattern,
    version: Version,
    authorize: boolean,
@@ -208,6 +210,7 @@ export function matchEvent(event: Record<string, any>, methodMap: MethodMap): Ht
          const cookie: string | undefined = event['headers']['cookie'];
 
          return {
+            name: handerInfo.name,
             method: method,
             rpID: rpID,
             rpOrigin: rpOrigin,

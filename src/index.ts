@@ -1455,6 +1455,9 @@ async function verifyCsrf(
 ) {
    const serverCsrf = await createCsrf(verifiedUser);
 
+   // Temporary for debugging
+   console.log(`csrfs, header: ${headerCsrf} server: ${serverCsrf}`);
+
    // TODO: Remove this check for undefined headerCsrf after client-side cache expires
    // This is a temporary measure for backward compatibility with clients that
    // do not send the CSRF token header. Change to:
@@ -1533,7 +1536,7 @@ export async function handler(event: any, context: any) {
    try {
       const httpDetails = matchEvent(event, METHODMAP);
 
-      console.log(`calling function: ${httpDetails.handler.name} authorize: ${httpDetails.authorize}`);
+      console.log(`calling function: ${httpDetails.name} authorize: ${httpDetails.authorize}`);
       console.log(`rpID: ${httpDetails.rpID} rpOrigin: ${httpDetails.rpOrigin}`);
       // Uncomment for debugging
       //      console.log('resourceId:' + httpDetails.resourceId);
@@ -1603,52 +1606,52 @@ export async function handler(event: any, context: any) {
 
 const METHODMAP: MethodMap = {
    GET: [
-      { pattern: Patterns.authOptions, version: 1, authorize: false, handler: getAuthOptions },
-      { pattern: Patterns.userInfo, version: 1, authorize: true, handler: getUserInfo },
-      { pattern: Patterns.userPasskeyOptions, version: 1, authorize: true, handler: getPasskeyOptions },
+      { name: 'getAuthOptions', pattern: Patterns.authOptions, version: 1, authorize: false, handler: getAuthOptions },
+      { name: 'getUserInfo', pattern: Patterns.userInfo, version: 1, authorize: true, handler: getUserInfo },
+      { name: 'getPasskeyOptions', pattern: Patterns.userPasskeyOptions, version: 1, authorize: true, handler: getPasskeyOptions },
       // Special case of an authenticated method that does not require csrf. Needed so GET session works in a fresh
       // tab/window, and should be safe since csrf isn't technically needed for GET calls due to Same-Origin
-      { pattern: Patterns.userSession, version: 1, authorize: true, checkCsrf: false, handler: getUserSession },
+      { name: 'getUserSession', pattern: Patterns.userSession, version: 1, authorize: true, checkCsrf: false, handler: getUserSession },
 
-      { pattern: OldPatterns.authOptions, version: 1, authorize: false, handler: getAuthOptions },
-      { pattern: OldPatterns.userInfo, version: 1, authorize: true, handler: getUserInfo },
+      { name: 'getAuthOptions', pattern: OldPatterns.authOptions, version: 1, authorize: false, handler: getAuthOptions },
+      { name: 'getUserInfo', pattern: OldPatterns.userInfo, version: 1, authorize: true, handler: getUserInfo },
    ],
    POST: [
-      { pattern: Patterns.authVerify, version: 1, authorize: false, handler: postAuthVerify },
-      { pattern: Patterns.regOptions, version: 1, authorize: false, handler: postRegOptions },
-      { pattern: Patterns.regVerify, version: 1, authorize: false, handler: postRegVerify },
-      { pattern: Patterns.userRecover, version: 1, authorize: false, handler: postRecover },
-      { pattern: Patterns.userRecover2, version: 1, authorize: false, handler: postRecover2 },
-      { pattern: Patterns.userPasskeyVerify, version: 1, authorize: false, handler: postUserPasskeyVerify },
+      { name: 'postAuthVerify', pattern: Patterns.authVerify, version: 1, authorize: false, handler: postAuthVerify },
+      { name: 'postRegOptions', pattern: Patterns.regOptions, version: 1, authorize: false, handler: postRegOptions },
+      { name: 'postRegVerify', pattern: Patterns.regVerify, version: 1, authorize: false, handler: postRegVerify },
+      { name: 'postRecover', pattern: Patterns.userRecover, version: 1, authorize: false, handler: postRecover },
+      { name: 'postRecover2', pattern: Patterns.userRecover2, version: 1, authorize: false, handler: postRecover2 },
+      { name: 'postUserPasskeyVerify', pattern: Patterns.userPasskeyVerify, version: 1, authorize: false, handler: postUserPasskeyVerify },
 
-      { pattern: Patterns.munge, version: INTERNAL_VERSION, authorize: false, handler: postMunge },
-      { pattern: Patterns.consistency, version: INTERNAL_VERSION, authorize: false, handler: postConsistency },
-      { pattern: Patterns.cleanse, version: INTERNAL_VERSION, authorize: false, handler: postCleanse },
-      { pattern: Patterns.loadaaguids, version: INTERNAL_VERSION, authorize: false, handler: postLoadAAGUIDs },
+      { name: 'postMunge', pattern: Patterns.munge, version: INTERNAL_VERSION, authorize: false, handler: postMunge },
+      { name: 'postConsistency', pattern: Patterns.consistency, version: INTERNAL_VERSION, authorize: false, handler: postConsistency },
+      { name: 'postCleanse', pattern: Patterns.cleanse, version: INTERNAL_VERSION, authorize: false, handler: postCleanse },
+      { name: 'postLoadAAGUIDs', pattern: Patterns.loadaaguids, version: INTERNAL_VERSION, authorize: false, handler: postLoadAAGUIDs },
 
 
-      { pattern: OldPatterns.regOptions, version: 1, authorize: false, handler: postRegOptions },
-      { pattern: OldPatterns.userPasskeyReg, version: 1, authorize: true, handler: getPasskeyOptions },
-      { pattern: OldPatterns.regVerify, version: 1, authorize: false, handler: postRegVerify },
-      { pattern: OldPatterns.authVerify, version: 1, authorize: false, handler: postAuthVerify },
-      { pattern: OldPatterns.verifySession, version: 1, authorize: true, handler: getUserSession },
-      { pattern: OldPatterns.endSession, version: 1, authorize: true, handler: deleteUserSession },
-      { pattern: OldPatterns.recover, version: 1, authorize: false, handler: postRecover },
-      { pattern: OldPatterns.recover2, version: 1, authorize: false, handler: postRecover2 },
+      { name: 'postRegOptions', pattern: OldPatterns.regOptions, version: 1, authorize: false, handler: postRegOptions },
+      { name: 'getPasskeyOptions', pattern: OldPatterns.userPasskeyReg, version: 1, authorize: true, handler: getPasskeyOptions },
+      { name: 'postRegVerify', pattern: OldPatterns.regVerify, version: 1, authorize: false, handler: postRegVerify },
+      { name: 'postAuthVerify', pattern: OldPatterns.authVerify, version: 1, authorize: false, handler: postAuthVerify },
+      { name: 'getUserSession', pattern: OldPatterns.verifySession, version: 1, authorize: true, handler: getUserSession },
+      { name: 'deleteUserSession', pattern: OldPatterns.endSession, version: 1, authorize: true, handler: deleteUserSession },
+      { name: 'postRecover', pattern: OldPatterns.recover, version: 1, authorize: false, handler: postRecover },
+      { name: 'postRecover2', pattern: OldPatterns.recover2, version: 1, authorize: false, handler: postRecover2 },
 
    ],
    PUT: [
-      { pattern: OldPatterns.description, version: 1, authorize: true, handler: patchPasskey },
-      { pattern: OldPatterns.userName, version: 1, authorize: true, handler: patchUserInfo },
+      { name: 'patchPasskey', pattern: OldPatterns.description, version: 1, authorize: true, handler: patchPasskey },
+      { name: 'patchUserInfo', pattern: OldPatterns.userName, version: 1, authorize: true, handler: patchUserInfo },
    ],
    PATCH: [
-      { pattern: Patterns.userPasskey, version: 1, authorize: true, handler: patchPasskey },
-      { pattern: Patterns.userInfo, version: 1, authorize: true, handler: patchUserInfo },
+      { name: 'patchPasskey', pattern: Patterns.userPasskey, version: 1, authorize: true, handler: patchPasskey },
+      { name: 'patchUserInfo', pattern: Patterns.userInfo, version: 1, authorize: true, handler: patchUserInfo },
    ],
    DELETE: [
-      { pattern: Patterns.userPasskey, version: 1, authorize: true, handler: deletePasskey },
-      { pattern: Patterns.userSession, version: 1, authorize: true, handler: deleteUserSession },
+      { name: 'deletePasskey', pattern: Patterns.userPasskey, version: 1, authorize: true, handler: deletePasskey },
+      { name: 'deleteUserSession', pattern: Patterns.userSession, version: 1, authorize: true, handler: deleteUserSession },
 
-      { pattern: OldPatterns.deletePasskey, version: 1, authorize: true, handler: deletePasskey },
+      { name: 'deletePasskey', pattern: OldPatterns.deletePasskey, version: 1, authorize: true, handler: deletePasskey },
    ],
 };
