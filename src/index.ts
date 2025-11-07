@@ -1438,10 +1438,10 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
    const token = sign(
       payload,
       jwtKey, {
-      algorithm: 'HS512',
-      expiresIn: expiresIn,
-      issuer: 'quickcrypt'
-   }
+         algorithm: 'HS512',
+         expiresIn: expiresIn,
+         issuer: 'quickcrypt'
+      }
    );
 
    const cookie = `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=${expiresIn}`
@@ -1454,9 +1454,6 @@ async function verifyCsrf(
    headerCsrf: string | undefined
 ) {
    const serverCsrf = await createCsrf(verifiedUser);
-
-   // Temporary for debugging
-   console.log(`csrfs, header: ${headerCsrf} server: ${serverCsrf}`);
 
    // TODO: Remove this check for undefined headerCsrf after client-side cache expires
    // This is a temporary measure for backward compatibility with clients that
@@ -1481,17 +1478,14 @@ async function verifyCookie(
    const jwtKey = await getSessionKey(unverifiedUser, "jwt_key");
    let payload: JwtPayload;
 
-   // Uncomment for temporary debuging only, since this logs user credentials
-   // payload = decode(token, {json: true})!;
-   // console.log(payload);
-
+   // Internally verifies exp date set with expiresIn during cookie creation
    try {
       payload = verify(
          token,
          jwtKey, {
-         algorithms: ['HS512'],
-         issuer: 'quickcrypt'
-      }
+            algorithms: ['HS512'],
+            issuer: 'quickcrypt'
+         }
       ) as JwtPayload;
 
    } catch (err) {
@@ -1499,6 +1493,7 @@ async function verifyCookie(
       throw new AuthError();
    }
 
+   // lastCredentialId is cleared on logout so cookie would be invalid
    if (!payload ||
       !payload.pkId ||
       payload.pkId !== unverifiedUser.lastCredentialId ||
