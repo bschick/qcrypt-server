@@ -1493,7 +1493,7 @@ async function verifyCookie(
       throw new AuthError();
    }
 
-   // lastCredentialId is cleared on logout so cookie would be invalid
+   // lastCredentialId is cleared on logout so cookie is invalid after logout
    if (!payload ||
       !payload.pkId ||
       payload.pkId !== unverifiedUser.lastCredentialId ||
