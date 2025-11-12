@@ -29,7 +29,6 @@ if (!globalThis.URLPattern) {
 import {
    INTERNAL_VERSION,
    matchEvent,
-   OldPatterns,
    Patterns,
    type HttpDetails,
    type MethodMap,
@@ -339,8 +338,7 @@ async function postAuthVerify(
    if (!body.response || !body.response.userHandle) {
       throw new ParamError('missing userHandle');
    }
-   // Temporarily, for backward compat allow no userid to be passed (remove this after clients update)
-   if (resources.userid && resources.userid !== body.response.userHandle) {
+   if (resources.userid !== body.response.userHandle) {
       throw new ParamError('mismatched userId');
    }
    if (!validB64(body.id)) {
@@ -504,8 +502,7 @@ async function _doPostRegVerify(
       resources,
    } = httpDetails;
 
-   // Temporarily, for backward compat allow no userid to be passed (remove this after clients update)
-   if (resources.userid && resources.userid !== body.userId) {
+   if (resources.userid !== body.userId) {
       throw new ParamError('mismatched userId');
    }
    if (!validB64(body.challenge)) {
@@ -1223,12 +1220,11 @@ async function postRecover(
    if (!validB64(userCred)) {
       throw new ParamError('invalid user credential');
    }
-
-   // for backward compat, remove params check after client update
-   const unverifiedUser = handlerUser.unverifiedUser ?? await getUnverifiedUser(params.userid);
-
-   // Require an existing verified user for recovery (after ?? is for backward compat and should be deleted)
-   const verifiedUser = checkVerified(unverifiedUser, resources.userid ?? params.userid);
+   // Require an existing verified user for recovery
+   if (!handlerUser.unverifiedUser) {
+      throw new AuthError();
+   }
+   const verifiedUser = checkVerified(handlerUser.unverifiedUser, resources.userid);
 
    if (verifiedUser.recoveryIdEnc && verifiedUser.recoveryIdEnc.length > 1) {
       throw new ParamError('must use recovery words instead');
@@ -1236,7 +1232,7 @@ async function postRecover(
 
    const userCredDecBytes = await decryptField(
       verifiedUser.userCredEnc,
-      { userId: unverifiedUser.userId },
+      { userId: verifiedUser.userId },
       USERCRED_BYTES
    );
 
@@ -1299,12 +1295,11 @@ async function postRecover2(
    if (!validB64(recoveryId)) {
       throw new ParamError('invalid recovery id');
    }
-
-   // for backward compat, remove params check after client update
-   const unverifiedUser = handlerUser.unverifiedUser ?? await getUnverifiedUser(params.userid);
-
-   // Require an existing verified user for recovery (after ?? is for backward compat and should be deleted)
-   const verifiedUser = checkVerified(unverifiedUser, resources.userid ?? params.userid);
+   // Require an existing verified user for recovery
+   if (!handlerUser.unverifiedUser) {
+      throw new AuthError();
+   }
+   const verifiedUser = checkVerified(handlerUser.unverifiedUser, resources.userid);
 
    // due to switch from recover to recover2, not all verified users have recoveryIdEnc
    if (!verifiedUser.recoveryIdEnc ||
@@ -1453,13 +1448,10 @@ async function verifyCsrf(
    checkCsrf: boolean,
    headerCsrf: string | undefined
 ) {
+   // Even if we don't check csrf, make sure we can create one
    const serverCsrf = await createCsrf(verifiedUser);
 
-   // TODO: Remove this check for undefined headerCsrf after client-side cache expires
-   // This is a temporary measure for backward compatibility with clients that
-   // do not send the CSRF token header. Change to:
-   // if (checkCsrf && (serverCsrf !== headerCsrf || !headerCsrf)) {
-   if (checkCsrf && headerCsrf !== undefined && serverCsrf !== headerCsrf) {
+   if (checkCsrf && (serverCsrf !== headerCsrf || !headerCsrf)) {
       throw new AuthError('invalid csrf token');
    }
 }
@@ -1607,9 +1599,6 @@ const METHODMAP: MethodMap = {
       // Special case of an authenticated method that does not require csrf. Needed so GET session works in a fresh
       // tab/window, and should be safe since csrf isn't technically needed for GET calls due to Same-Origin
       { name: 'getUserSession', pattern: Patterns.userSession, version: 1, authorize: true, checkCsrf: false, handler: getUserSession },
-
-      { name: 'getAuthOptions', pattern: OldPatterns.authOptions, version: 1, authorize: false, handler: getAuthOptions },
-      { name: 'getUserInfo', pattern: OldPatterns.userInfo, version: 1, authorize: true, handler: getUserInfo },
    ],
    POST: [
       { name: 'postAuthVerify', pattern: Patterns.authVerify, version: 1, authorize: false, handler: postAuthVerify },
@@ -1619,25 +1608,13 @@ const METHODMAP: MethodMap = {
       { name: 'postRecover2', pattern: Patterns.userRecover2, version: 1, authorize: false, handler: postRecover2 },
       { name: 'postUserPasskeyVerify', pattern: Patterns.userPasskeyVerify, version: 1, authorize: false, handler: postUserPasskeyVerify },
 
+      // Internal only endpoints that are not exposed in cloudfront and require special auth
       { name: 'postMunge', pattern: Patterns.munge, version: INTERNAL_VERSION, authorize: false, handler: postMunge },
       { name: 'postConsistency', pattern: Patterns.consistency, version: INTERNAL_VERSION, authorize: false, handler: postConsistency },
       { name: 'postCleanse', pattern: Patterns.cleanse, version: INTERNAL_VERSION, authorize: false, handler: postCleanse },
       { name: 'postLoadAAGUIDs', pattern: Patterns.loadaaguids, version: INTERNAL_VERSION, authorize: false, handler: postLoadAAGUIDs },
-
-
-      { name: 'postRegOptions', pattern: OldPatterns.regOptions, version: 1, authorize: false, handler: postRegOptions },
-      { name: 'getPasskeyOptions', pattern: OldPatterns.userPasskeyReg, version: 1, authorize: true, handler: getPasskeyOptions },
-      { name: 'postRegVerify', pattern: OldPatterns.regVerify, version: 1, authorize: false, handler: postRegVerify },
-      { name: 'postAuthVerify', pattern: OldPatterns.authVerify, version: 1, authorize: false, handler: postAuthVerify },
-      { name: 'getUserSession', pattern: OldPatterns.verifySession, version: 1, authorize: true, handler: getUserSession },
-      { name: 'deleteUserSession', pattern: OldPatterns.endSession, version: 1, authorize: true, handler: deleteUserSession },
-      { name: 'postRecover', pattern: OldPatterns.recover, version: 1, authorize: false, handler: postRecover },
-      { name: 'postRecover2', pattern: OldPatterns.recover2, version: 1, authorize: false, handler: postRecover2 },
-
    ],
    PUT: [
-      { name: 'patchPasskey', pattern: OldPatterns.description, version: 1, authorize: true, handler: patchPasskey },
-      { name: 'patchUserInfo', pattern: OldPatterns.userName, version: 1, authorize: true, handler: patchUserInfo },
    ],
    PATCH: [
       { name: 'patchPasskey', pattern: Patterns.userPasskey, version: 1, authorize: true, handler: patchPasskey },
@@ -1646,7 +1623,5 @@ const METHODMAP: MethodMap = {
    DELETE: [
       { name: 'deletePasskey', pattern: Patterns.userPasskey, version: 1, authorize: true, handler: deletePasskey },
       { name: 'deleteUserSession', pattern: Patterns.userSession, version: 1, authorize: true, handler: deleteUserSession },
-
-      { name: 'deletePasskey', pattern: OldPatterns.deletePasskey, version: 1, authorize: true, handler: deletePasskey },
    ],
 };

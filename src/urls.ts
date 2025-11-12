@@ -121,48 +121,6 @@ export const Patterns = {
    })
 };
 
-export const OldPatterns = {
-   regOptions: new URLPattern({
-      pathname: '/v:ver/userreg',
-   }),
-   userPasskeyReg: new URLPattern({
-      pathname: `/v:ver/user/:userid/passkeyreg`,
-   }),
-   regVerify: new URLPattern({
-      pathname: '/v:ver/verifyreg',
-   }),
-   authOptions: new URLPattern({
-      pathname: '/v:ver/authoptions',
-   }),
-   authVerify: new URLPattern({
-      pathname: '/v:ver/verifyauth',
-   }),
-   verifySession: new URLPattern({
-      pathname: `/v:ver/user/:userid/verifysess`,
-   }),
-   endSession: new URLPattern({
-      pathname: `/v:ver/user/:userid/endsess`,
-   }),
-   userInfo: new URLPattern({
-      pathname: `/v:ver/user/:userid/userinfo`,
-   }),
-   description: new URLPattern({
-      pathname: `/v:ver/user/:userid/description/:credid`,
-   }),
-   userName: new URLPattern({
-      pathname: `/v:ver/user/:userid/username`,
-   }),
-   recover: new URLPattern({
-      pathname: `/v:ver/recover/:usercred`,
-   }),
-   recover2: new URLPattern({
-      pathname: `/v:ver/recover2/:recoveryid`,
-   }),
-   deletePasskey: new URLPattern({
-      pathname: `/v:ver/user/:userid/authenticator/:credid`,
-   })
-};
-
 
 export function matchEvent(event: Record<string, any>, methodMap: MethodMap): HttpDetails {
 
