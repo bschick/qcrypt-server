@@ -61,7 +61,7 @@ export async function postLoadAAGUIDs(
             darkIcon: details['dark_file'] ?? darkFileDefault
          });
 
-         if (++count % 10 == 0) {
+         if (++count % 10 === 0) {
             await AAGUIDs.put(batch).go();
             batch = [];
             await setTimeout(1000);
@@ -77,39 +77,6 @@ export async function postLoadAAGUIDs(
 }
 
 
-export async function postCleanse(
-   httpDetails: HttpDetails
-): Promise<Response> {
-
-   const days = 1;
-   const olderThan = Date.now() - (days * 24 * 60 * 60 * 1000);
-
-   //@ts-ignore
-   const results = await Users.scan.where(({ verified, createdAt }, { eq, lt }) =>
-      `${eq(verified, false)} AND ${lt(createdAt, olderThan)}`
-   ).go({ attributes: ['userId'] });
-
-   if (results && results.data) {
-      console.log(`removing ${results.data.length} unverified users more than ${days} old`);
-
-      for (let user of results.data) {
-         const deleted = await Users.delete({
-            userId: user.userId
-         }).go({
-            response: 'all_old' // needed to determine of anything was deleted
-         });
-
-         if (!deleted || !deleted.data) {
-            console.error('failed to delete ' + user.userId);
-         }
-      }
-   } else {
-      console.log('nothing to remove');
-   }
-
-   return { content: { message: 'done' } };
-}
-
 export async function postConsistency(
    httpDetails: HttpDetails
 ): Promise<Response> {
@@ -117,7 +84,9 @@ export async function postConsistency(
       params
    } = httpDetails;
 
-   const batchSize = 14;
+   const batchSize = 50;
+   const maxScan = 1000;
+   const daysOld = 1;
 
    if (!params['tables'] || params.tables.includes('authenticators')) {
 
@@ -130,6 +99,7 @@ export async function postConsistency(
       let total = 0;
       let leaked = 0;
       let deleted = 0;
+      let deleteBatch = [];
 
       while (auths && auths.data && auths.data.length > 0) {
          total += auths.data.length;
@@ -140,27 +110,18 @@ export async function postConsistency(
             }).go({ attributes: ['userId'] });
 
             if (!user || !user.data) {
-               console.error(`missing userId ${auth.userId} for auth ${auth.credentialId}`);
+               console.log(`missing userId ${auth.userId} for auth ${auth.credentialId}`);
                leaked += 1;
                if (params['cleanse']) {
-                  const result = await Authenticators.delete({
+                  deleteBatch.push({
                      userId: auth.userId,
                      credentialId: auth.credentialId
-                  }).go({
-                     response: 'all_old' // needed to determine of anything was deleted
                   });
-
-                  if (!result || !result.data) {
-                     console.error(`delete of ${auth.credentialId} for ${auth.userId} failed`);
-                  } else {
-                     deleted += 1;
-                  }
                }
             }
-
          }
 
-         if (!auths.cursor) {
+         if (!auths.cursor || total >= maxScan ) {
             break;
          }
          auths = await Authenticators.scan.go({
@@ -170,12 +131,25 @@ export async function postConsistency(
          });
       }
 
-      console.log(`${total} auths found with ${leaked} leaked and ${deleted} deleted`);
+      if (params['cleanse'] && deleteBatch.length > 0 ) {
+         // ElectroDB handles running this sequentially in groups of 25 for dynamoDB
+         console.log(`deleting ${deleteBatch.length} authenticators`);
+         const result = await Authenticators.delete(deleteBatch).go();
+
+         // results are unprocessed records, meaning it didn't complete if they exist
+         if (result && result.data) {
+            console.error(`delete of all ${deleteBatch.length} authenticators failed`);
+         } else {
+            deleted = deleteBatch.length;
+         }
+      }
+
+      console.log(`${total} authenticators scanned with ${leaked} leaked and ${deleted} deleted`);
 
    }
    if (params['tables'] && params.tables.includes('users')) {
 
-      const userAttrs = ["userId", "verified", "userName"] as const;
+      const userAttrs = ["userId", "verified", "userName", "createdAt"] as const;
       let users = await Users.scan.go({
          attributes: userAttrs,
          limit: batchSize
@@ -184,7 +158,11 @@ export async function postConsistency(
       let total = 0;
       let unverified = 0;
       let leaked = 0;
+      let expired = 0;
       let deleted = 0;
+      let deleteBatch = [];
+
+      const olderThan = Date.now() - (daysOld * 24 * 60 * 60 * 1000);
 
       while (users && users.data && users.data.length > 0) {
          total += users.data.length;
@@ -201,28 +179,31 @@ export async function postConsistency(
                }).go({ attributes: ['credentialId'] });
 
                if (!auths || auths.data.length === 0) {
-                  console.error(`no credentials for user ${user.userId}, ${user.userName}`);
+                  console.log(`no credentials for user: ${user.userId}, ${user.userName}`);
                   leaked += 1;
                   if (params['cleanse']) {
-                     const result = await Users.delete({
+                     deleteBatch.push({
                         userId: user.userId
-                     }).go({
-                        response: 'all_old' // needed to determine of anything was deleted
                      });
-
-                     if (!result || !result.data) {
-                        console.error(`delete of ${user.userId} failed`);
-                     } else {
-                        deleted += 1;
-                     }
                   }
                }
             } else {
+               // This is for cleanup of records where something has gone wrong or left-over from
+               // previous to the use of DynamoDB TTL automatic cleanup.
                unverified += 1;
+               if (user.createdAt && user.createdAt < olderThan) {
+                  console.log(`unverified user is expired: ${user.userId}, ${user.userName}`);
+                  expired += 1;
+                  if (params['cleanse']) {
+                     deleteBatch.push({
+                        userId: user.userId
+                     });
+                  }
+               }
             }
          }
 
-         if (!users.cursor) {
+         if (!users.cursor || total >= maxScan ) {
             break;
          }
          users = await Users.scan.go({
@@ -232,7 +213,19 @@ export async function postConsistency(
          });
       }
 
-      console.log(`${total} users found with ${leaked} leaked, ${deleted} deleted, and ${unverified} unverified`);
+      if (params['cleanse'] && deleteBatch.length > 0 ) {
+         // ElectroDB handles running this sequentially in groups of 25 for dynamoDB
+         console.log(`deleting ${deleteBatch.length} users`);
+         const result = await Users.delete(deleteBatch).go();
+
+         // results are unprocessed records, meaning it didn't complete if they exist
+         if (result && result.data) {
+            console.error(`delete of all ${deleteBatch.length} users failed`);
+         } else {
+            deleted = deleteBatch.length;
+         }
+      }
+      console.log(`${total} users scanned with ${leaked} leaked, ${expired} expired, ${unverified} unverified, and ${deleted} deleted`);
    }
 
    return { content: { message: "done" } };

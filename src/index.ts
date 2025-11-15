@@ -72,7 +72,7 @@ import {
 
 import { hkdfSync } from 'node:crypto';
 import { sign, verify, decode, type JwtPayload } from 'jsonwebtoken';
-import { postCleanse, postConsistency, postLoadAAGUIDs, postMunge } from './internal';
+import { postConsistency, postLoadAAGUIDs, postMunge } from './internal';
 import {
    ParamError,
    AuthError,
@@ -1618,7 +1618,6 @@ const METHODMAP: MethodMap = {
       // Internal only endpoints that are not exposed in cloudfront and require special auth
       { name: 'postMunge', pattern: Patterns.munge, version: INTERNAL_VERSION, authorize: false, handler: postMunge },
       { name: 'postConsistency', pattern: Patterns.consistency, version: INTERNAL_VERSION, authorize: false, handler: postConsistency },
-      { name: 'postCleanse', pattern: Patterns.cleanse, version: INTERNAL_VERSION, authorize: false, handler: postCleanse },
       { name: 'postLoadAAGUIDs', pattern: Patterns.loadaaguids, version: INTERNAL_VERSION, authorize: false, handler: postLoadAAGUIDs },
    ],
    PUT: [

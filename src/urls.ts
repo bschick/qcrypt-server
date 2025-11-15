@@ -115,9 +115,6 @@ export const Patterns = {
    }),
    consistency: new URLPattern({
       pathname: '/v:ver/consistency'
-   }),
-   cleanse: new URLPattern({
-      pathname: '/v:ver/cleanse'
    })
 };
 
