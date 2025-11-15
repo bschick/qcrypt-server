@@ -24,8 +24,6 @@ import type { HttpDetails } from "./urls";
 import {
    Users,
    Authenticators,
-   Challenges,
-   AuthEvents,
    AAGUIDs
 } from "./models";
 
@@ -83,7 +81,7 @@ export async function postCleanse(
    httpDetails: HttpDetails
 ): Promise<Response> {
 
-   const days = 15;
+   const days = 1;
    const olderThan = Date.now() - (days * 24 * 60 * 60 * 1000);
 
    //@ts-ignore

@@ -81,6 +81,10 @@ export const Users = new Entity(
             default: () => Date.now(),
             // should not be modified after created
             readOnly: true
+         },
+         expiresAt: {
+            type: "number",
+            required: false
          }
       },
       indexes: {

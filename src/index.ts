@@ -639,6 +639,8 @@ async function _doPostRegVerify(
             { userId: unverifiedUser.userId }
          );
 
+         // Very important that we remove the expiresAt attribute so that the
+         // record is not automatically cleaned up by dynamoDB
          await Users.patch({
             userId: unverifiedUser.userId,
          }).set({
@@ -648,7 +650,7 @@ async function _doPostRegVerify(
             recoveryIdEnc: recoveryIdEnc,
             lastCredentialId: auth.data.credentialId,
             authCount: 1
-         }).go();
+         }).remove(['expiresAt']).go();
 
          unverifiedUser.verified = true;
          unverifiedUser.userCredEnc = userCredEnc;
@@ -826,9 +828,14 @@ async function postRegOptions(
       throw new Error('could not allocate userId');
    }
 
+   // TTL value that DynamoDB references to delete recrod 1 day from now if
+   // the registration is not verified (verify removes expiresAt attribute)
+   const expires = Math.floor(Date.now() / 1000) + 86400;
+
    const created = await Users.create({
       userId: uId,
       userName: userName,
+      expiresAt: expires,
       userCredEnc: undefined,
       recoveryIdEnc: undefined
    }).go();
