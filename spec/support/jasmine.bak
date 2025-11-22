@@ -1,0 +1,12 @@
+// spec/support/jasmine.cjs
+module.exports = {
+  spec_dir: "spec",
+  spec_files: [
+    "**/*.spec.ts",
+    "**/*.spec.js"
+  ],
+  helpers: ["helpers/**/*.ts"],
+  random: false,
+  stopSpecOnExpectationFailure: false,
+};
+
