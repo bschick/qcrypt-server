@@ -9,6 +9,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `POST`
 - **Path:** `/v1/reg/options`
+- **Headers:** 'x-amz-content-sha256': SHA-256 Hex string digest of request body
 - **Authorization:** Not required
 - **Description:** Start registration of a new user and returns registration options for creating a passkey.
 - **Request Body:** A JSON object with a `userName` key. Example: `{"userName": "New User"}`. User name must greater than 5 and less than 32 characters and may not contain HTML tags.
@@ -20,6 +21,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `POST`
 - **Path:** `/v1/users/{userid}/reg/verify`
+- **Headers:** 'x-amz-content-sha256': SHA-256 Hex string digest of request body
 - **Authorization:** Not required
 - **Description:** Verifies a registration response from a client, creating a new user and passkey. Response contains a `csrf` token that must be sent in the `x-csrf-token` header for authorized requests.
 - **Request Body:** The SimpleWebAuthn/client `RegistrationResponseJSON` JSON object response & `challenge` & `userId` created by client from previous POST to `/v1/reg/options`.
@@ -50,6 +52,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `POST`
 - **Path:** `/v1/users/{userid}/auth/verify`
+- **Headers:** 'x-amz-content-sha256': SHA-256 Hex string digest of request body
 - **Authorization:** Not required
 - **Description:** Verifies an authentication response from a client and established a new user session. Response contains a `csrf` token that must be sent in a `x-csrf-token` header for authorized requests.
 - **Request Body:** The SimpleWebAuthn/client `AuthenticationResponseJSON` JSON object response & `challenge` created by client from previous GET to `/v1/auth/options`.
@@ -78,6 +81,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `POST`
 - **Path:** `/v1/users/{userid}/passkeys/verify`
+- **Headers:** 'x-amz-content-sha256': SHA-256 Hex string digest of request body
 - **Authorization:** Not required
 - **Description:** Verifies a registration response from a client and adds a new passkey to the user account.
 - **Request Body:** The SimpleWebAuthn/client `RegistrationResponseJSON` JSON object response & `challenge` & `userId` created by client from previous POST to `/v1/users/{userid}/passkeys/options`.
@@ -93,8 +97,9 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `PATCH`
 - **Path:** `/v1/users/{userid}/passkeys/{credid}`
+- **Headers:** 'x-amz-content-sha256': SHA-256 Hex string digest of request body
 - **Authorization:** Required (cookie and x-csrf-token)
-- **Description:** Updates the description of an passkey specified by `credid`.
+- **Description:** Updates the description of the passkey specified by `credid`.
 - **Request Body:** A JSON object with a `description` key. Example: `{"description": "My Yubikey"}`. Passkey description must greater than 5 and less than 43 characters and may not contain HTML tags.
 - **Responses:**
   - `200 OK`: A `UserInfo` JSON object.
@@ -106,7 +111,7 @@ This document provides documentation for the passkey-based authentication server
 - **Method:** `DELETE`
 - **Path:** `/v1/users/{userid}/passkeys/{credid}`
 - **Authorization:** Required (cookie and x-csrf-token)
-- **Description:** Deletes an passkey specified by `credid`.
+- **Description:** Deletes the passkey specified by `credid`. When a user's last passkey is deleted, the entire user account is permanently deleted and cannot be recovered.
 - **Responses:**
   - `200 OK`: A `UserInfo` JSON object. If this was the last passkey, the entire user account will be deleted and the response will indicate the user is not verified.
   - `400 Bad Request`: The credential ID is not valid.
@@ -130,6 +135,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `PATCH`
 - **Path:** `/v1/users/{userid}`
+- **Headers:** 'x-amz-content-sha256': SHA-256 Hex string digest of request body
 - **Authorization:** Required (cookie and x-csrf-token)
 - **Description:** Updates the username of the user specified by `userid`.
 - **Request Body:** A JSON object with a `userName` key. Example: `{"userName": "Some Name"}`. User name must greater than 5 and less than 32 characters and may not contain HTML tags.
@@ -142,6 +148,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `POST`
 - **Path:** `/v1/users/{userid}/recover/{usercred}`
+- **Headers:** 'x-amz-content-sha256': SHA-256 Hex string digest of request body
 - **Authorization:** Not required
 - **Description:** Deprecated, use `/v1/recover2` with `recoveryid` instead. Initiates the account recovery process. This will delete all existing passkeys for the user and return registration options to create a new passkey.
 - **Responses:**
@@ -152,6 +159,7 @@ This document provides documentation for the passkey-based authentication server
 
 - **Method:** `POST`
 - **Path:** `/v1/users/{userid}/recover2/{recoverid}`
+- **Headers:** 'x-amz-content-sha256': SHA-256 Hex string digest of request body
 - **Authorization:** Not required
 - **Description:** Initiates the account recovery process using a recovery ID provided in `recoveryid`. This will delete all existing passkeys for the user and return registration options to create a new passkey.
 - **Responses:**
