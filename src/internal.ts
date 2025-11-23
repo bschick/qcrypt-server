@@ -28,10 +28,10 @@ import {
 } from "./models";
 
 import {
-    darkFileDefault,
-    lightFileDefault,
-    type Response
- } from "./index";
+   darkFileDefault,
+   lightFileDefault,
+   type Response
+} from "./index";
 
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -121,7 +121,7 @@ export async function postConsistency(
             }
          }
 
-         if (!auths.cursor || total >= maxScan ) {
+         if (!auths.cursor || total >= maxScan) {
             break;
          }
          auths = await Authenticators.scan.go({
@@ -131,13 +131,13 @@ export async function postConsistency(
          });
       }
 
-      if (params['cleanse'] && deleteBatch.length > 0 ) {
+      if (params['cleanse'] && deleteBatch.length > 0) {
          // ElectroDB handles running this sequentially in groups of 25 for dynamoDB
          console.log(`deleting ${deleteBatch.length} authenticators`);
          const result = await Authenticators.delete(deleteBatch).go();
 
          // results are unprocessed records, meaning it didn't complete if they exist
-         if (result && result.data) {
+         if (result && result.unprocessed && result.unprocessed.length > 0) {
             console.error(`delete of all ${deleteBatch.length} authenticators failed`);
          } else {
             deleted = deleteBatch.length;
@@ -203,7 +203,7 @@ export async function postConsistency(
             }
          }
 
-         if (!users.cursor || total >= maxScan ) {
+         if (!users.cursor || total >= maxScan) {
             break;
          }
          users = await Users.scan.go({
@@ -213,13 +213,13 @@ export async function postConsistency(
          });
       }
 
-      if (params['cleanse'] && deleteBatch.length > 0 ) {
+      if (params['cleanse'] && deleteBatch.length > 0) {
          // ElectroDB handles running this sequentially in groups of 25 for dynamoDB
          console.log(`deleting ${deleteBatch.length} users`);
          const result = await Users.delete(deleteBatch).go();
 
          // results are unprocessed records, meaning it didn't complete if they exist
-         if (result && result.data) {
+         if (result && result.unprocessed && result.unprocessed.length > 0) {
             console.error(`delete of all ${deleteBatch.length} users failed`);
          } else {
             deleted = deleteBatch.length;
