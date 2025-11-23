@@ -764,7 +764,8 @@ async function getPasskeyOptions(
    handlerUser: HandlerUser
 ): Promise<Response> {
    const {
-      rpID
+      rpID,
+      rpOrigin
    } = httpDetails;
 
    const verifiedUser = handlerUser.verifiedUser;
@@ -772,7 +773,7 @@ async function getPasskeyOptions(
       throw new AuthError();
    }
 
-   return registrationOptions(rpID, verifiedUser);
+   return registrationOptions(rpID, rpOrigin, verifiedUser);
 }
 
 
@@ -781,6 +782,7 @@ async function postRegOptions(
 ): Promise<Response> {
    const {
       rpID,
+      rpOrigin,
       body,
    } = httpDetails;
 
@@ -844,11 +846,12 @@ async function postRegOptions(
       throw new ParamError('user not created or found');
    }
 
-   return registrationOptions(rpID, created.data);
+   return registrationOptions(rpID, rpOrigin, created.data);
 }
 
 async function registrationOptions(
    rpID: string,
+   rpOrigin: string,
    unverifiedUser: UnverifiedUserItem
 ): Promise<Response> {
 
@@ -893,6 +896,8 @@ async function registrationOptions(
 
       // Let this happen async
       recordEvent(EventNames.RegOptions, unverifiedUser.userId);
+      //@ts-ignore
+      options.rp['origin'] = rpOrigin;
       return { content: options };
    } catch (err) {
       console.error(err);
@@ -1219,8 +1224,8 @@ async function postRecover(
 ): Promise<Response> {
    const {
       rpID,
+      rpOrigin,
       resources,
-      params
    } = httpDetails;
 
    const userCred = resources['usercred'];
@@ -1282,7 +1287,7 @@ async function postRecover(
    recordEvent(EventNames.Recover, verifiedUser.userId);
 
    // caller should followup with call to verifyRegistration
-   return registrationOptions(rpID, verifiedUser);
+   return registrationOptions(rpID, rpOrigin, verifiedUser);
 }
 
 // recover removes all existing passkeys, then initiates the
@@ -1294,8 +1299,8 @@ async function postRecover2(
 ): Promise<Response> {
    const {
       rpID,
-      resources,
-      params
+      rpOrigin,
+      resources
    } = httpDetails;
 
    const recoveryId = resources['recoveryid'];
@@ -1358,7 +1363,7 @@ async function postRecover2(
    recordEvent(EventNames.Recover, verifiedUser.userId);
 
    // caller should followup with call to verifyRegistration
-   return registrationOptions(rpID, verifiedUser);
+   return registrationOptions(rpID, rpOrigin, verifiedUser);
 }
 
 // Currently origin is stored on each Authenticator, but it isn't used (other
