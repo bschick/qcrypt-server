@@ -21,7 +21,8 @@
     "jasmine": "^5.12.0",
     "jasmine-ts": "^0.4.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "nid-webauthn-emulator": "^0.2.8"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.840.0",
@@ -29,7 +30,6 @@
     "@simplewebauthn/server": "^13.0.0",
     "electrodb": "^3.4.0",
     "jsonwebtoken": "^9.0.2",
-    "nid-webauthn-emulator": "^0.2.8",
     "urlpattern-polyfill": "^10.1.0",
     "xss": "^1.0.15"
   }
