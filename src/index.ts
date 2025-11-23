@@ -1518,7 +1518,7 @@ function makeResponse(content: string, status: number, cookie?: string): any {
       resp.headers["Set-Cookie"] = cookie;
    }
 
-   console.log(`status: ${status} cookie: ${Boolean(cookie)} ${status != 200 ? 'error: ' + content : ''}`);
+   console.log(`status: ${status}, cookie: ${Boolean(cookie)} ${status != 200 ? ', error: ' + content : ''}`);
    return resp;
 }
 
@@ -1530,12 +1530,8 @@ export async function handler(event: any, context: any) {
    try {
       const httpDetails = matchEvent(event, METHODMAP);
 
-      console.log(`calling function: ${httpDetails.name} authorize: ${httpDetails.authorize}`);
-      console.log(`rpID: ${httpDetails.rpID} rpOrigin: ${httpDetails.rpOrigin}`);
-      // Uncomment for debugging
-      //      console.log('resourceId:' + httpDetails.resourceId);
-      //      console.log('params: ' + JSON.stringify(httpDetails.params));
-      //      console.log('body: ', httpDetails.body);
+      console.log(`calling function: ${httpDetails.name}, authorize: ${httpDetails.authorize}`);
+      console.log(`rpID: ${httpDetails.rpID}, rpOrigin: ${httpDetails.rpOrigin}`);
 
       let unverifiedUser: UnverifiedUserItem | undefined;
       let verifiedUser: VerifiedUserItem | undefined;

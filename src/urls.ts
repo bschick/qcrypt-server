@@ -136,6 +136,7 @@ export function matchEvent(event: Record<string, any>, methodMap: MethodMap): Ht
 
    const method: Method = event['requestContext']['http']['method'].toUpperCase();
    const path = event['requestContext']['http']['path'];
+   // console.log(`${method} ${path}`);
 
    const handlerInfos: HandlerInfo[] = methodMap[method];
 
@@ -150,6 +151,9 @@ export function matchEvent(event: Record<string, any>, methodMap: MethodMap): Ht
          let body: Record<string, any> = {};
          if ('body' in event) {
             let rawBody = event['body'];
+            // Uncomment for debugging
+            // console.log(`raw body: ${rawBody}`);
+
             try {
                if (event.isBase64Encoded) {
                   rawBody = new TextDecoder().decode(base64Decode(rawBody));
@@ -163,6 +167,11 @@ export function matchEvent(event: Record<string, any>, methodMap: MethodMap): Ht
 
          const params: QParams = event['queryStringParameters'] ?? {};
          const cookie: string | undefined = event['headers']['cookie'];
+
+         // Uncomment for debugging
+         // console.log('resources: ' + JSON.stringify(params));
+         // console.log('params: ' + JSON.stringify(match.pathname.groups));
+         // console.log('body: ' + JSON.stringify(body));
 
          return {
             name: handerInfo.name,
