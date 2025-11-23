@@ -5,7 +5,6 @@
     "moduleDetection": "force",
 //    "module": "commonjs",
     "module": "ES2022",
-    "rootDir": "src",
     "moduleResolution": "node",
     "noEmit": true,
     "resolveJsonModule": true,
