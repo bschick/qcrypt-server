@@ -1,33 +1,28 @@
 import crypto from "crypto";
-import fetch from "node-fetch";
-import WebAuthnEmulatorPkg from "nid-webauthn-emulator";
+import { WebAuthnEmulator } from "nid-webauthn-emulator";
 
 // ----- Setup -----
-const WebAuthnEmulator = (WebAuthnEmulatorPkg as any).default || WebAuthnEmulatorPkg;
-const QC = process.env.QC_SERVER || "https://test.quickcrypt.org";
+const API_SERVER = process.env.QC_ENV === 'prod' ? "https://quickcrypt.org" : "https://test.quickcrypt.org";
 
 // ----- Helpers -----
 function sha256Hex(buf: Buffer): string {
   return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
-function mergeCookies(existing: string, newCookies: string): string {
-  if (!existing && !newCookies) return "";
-  const cookieMap: Record<string, string> = {};
-  const parts = [...(existing ? existing.split("; ") : []), ...(newCookies ? newCookies.split("; ") : [])];
-  for (const c of parts) {
-    if (!c) continue;
-    const [k, v] = c.split("=").map((s) => s.trim());
-    if (k && v) cookieMap[k] = v;
-  }
-  return Object.entries(cookieMap).map(([k, v]) => `${k}=${v}`).join("; ");
-}
+async function request(
+  method: string,
+  path: string,
+  bodyObj: any = null,
+  extraHeaders: Record<string,
+  string> = {},
+  cookie = "",
+  origin = ""
+) {
 
-async function request(method: string, path: string, bodyObj: any = null, extraHeaders: Record<string, string> = {}, cookies = "", origin = "") {
   const headers: Record<string, string> = { "User-Agent": "Mozilla/5.0", ...extraHeaders };
   if (origin) headers["Origin"] = origin;
-  if (cookies) headers["Cookie"] = cookies;
-  
+  if (cookie) headers["Cookie"] = cookie;
+
   let body;
   if (bodyObj) {
     const json = JSON.stringify(bodyObj);
@@ -36,17 +31,20 @@ async function request(method: string, path: string, bodyObj: any = null, extraH
     headers["x-amz-content-sha256"] = sha256Hex(body);
   }
 
-  const res = await fetch(`${QC}${path}`, { method, headers, body });
+  const res = await fetch(`${API_SERVER}${path}`, { method, headers: headers, body });
   const raw = await res.text();
-  
+
+
   let data: any;
   try { data = JSON.parse(raw); } catch { data = undefined; }
 
-  const setCookies = (res.headers as any).raw?.()["set-cookie"] || [];
-  const newCookies = setCookies.map((c: string) => c.split(";")[0]).join("; ");
-  const allCookies = mergeCookies(cookies, newCookies);
+  let responseCookie = '';
+  const match = /(__Host-JWT=.+?);/.exec(res.headers.getSetCookie()[0]);
+  if (match && match[1]) {
+    responseCookie = match[1];
+  }
 
-  return { status: res.status, data, cookies: allCookies, rawText: raw };
+  return { status: res.status, data, cookie: responseCookie, rawText: raw };
 }
 
 const postJson = (p: string, b: any, h: any, c: string, o: string) => request("POST", p, b, h, c, o);
@@ -64,10 +62,10 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
   const testUser = `test_${Date.now()}`;
   let userId: string;
   let credId: string; // pkId
-  let sessionCookies: string = "";
+  let sessionCookie: string = "";
   let csrfToken: string = "";
   let currentOrigin: string = "";
-  let emulator: any;
+  let emulator: WebAuthnEmulator;
 
   // --- 1. Registration & Setup ---
   describe("1. Registration", () => {
@@ -76,10 +74,9 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
       const regOpts = await postJson("/v1/reg/options", { userName: testUser }, {}, "", "");
       expect(regOpts.status).toBe(200);
       expect(regOpts.data.user.name).toBe(testUser);
-      
-      sessionCookies = regOpts.cookies;
+
       userId = regOpts.data.user.id;
-      currentOrigin = `https://${regOpts.data.rp.id}:4200`;
+      currentOrigin = regOpts.data.rp.origin;
       emulator = new WebAuthnEmulator();
 
       // B. Verify
@@ -93,7 +90,7 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
         `/v1/users/${userId}/reg/verify`,
         { ...attestation, userId, challenge: regOpts.data.challenge },
         {},
-        sessionCookies,
+        sessionCookie,
         currentOrigin
       );
 
@@ -101,8 +98,9 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
       expect(verifyRes.data.verified).toBe(true);
       expect(verifyRes.data.csrf).toBeDefined();
       expect(verifyRes.data.pkId).toBeDefined();
+      expect(verifyRes.cookie).toBeTruthy();
 
-      sessionCookies = verifyRes.cookies;
+      sessionCookie = verifyRes.cookie;
       csrfToken = verifyRes.data.csrf;
       credId = verifyRes.data.pkId;
     });
@@ -111,7 +109,12 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
   // --- 2. User & Session Management (Authenticated) ---
   describe("2. User & Session Management", () => {
     it("should fetch current session details", async () => {
-      const res = await getJson(`/v1/users/${userId}/session`, {}, sessionCookies, currentOrigin);
+      const res = await getJson(
+        `/v1/users/${userId}/session`,
+        { "x-csrf-token": csrfToken },
+        sessionCookie,
+        currentOrigin
+      );
       expect(res.status).toBe(200);
       expect(res.data.csrf).toBeDefined();
       // Update CSRF in case it rotated (though usually static per session)
@@ -122,7 +125,7 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
       const res = await getJson(
         `/v1/users/${userId}`,
         { "x-csrf-token": csrfToken },
-        sessionCookies,
+        sessionCookie,
         currentOrigin
       );
       expect(res.status).toBe(200);
@@ -135,7 +138,7 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
         `/v1/users/${userId}`,
         { userName: newName },
         { "x-csrf-token": csrfToken },
-        sessionCookies,
+        sessionCookie,
         currentOrigin
       );
       expect(res.status).toBe(200);
@@ -149,7 +152,7 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
       const res = await deleteJson(
         `/v1/users/${userId}/session`,
         { "x-csrf-token": csrfToken },
-        sessionCookies,
+        sessionCookie,
         currentOrigin
       );
       expect(res.status).toBe(200);
@@ -160,9 +163,11 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
       const res = await getJson(
         `/v1/users/${userId}`,
         { "x-csrf-token": csrfToken },
-        sessionCookies, // Sending old cookie
+        sessionCookie, // Sending old cookie
         currentOrigin
       );
+
+      sessionCookie = '';
       expect(res.status).toBe(401); // Expect Unauthorized
     });
 
@@ -171,11 +176,11 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
       const optsRes = await getJson(
         `/v1/auth/options?userid=${userId}`,
         {},
-        "", 
+        "",
         currentOrigin
       );
       expect(optsRes.status).toBe(200);
-      
+
       // Sign Challenge
       const assertion = emulator.getJSON(currentOrigin, {
         ...optsRes.data,
@@ -187,15 +192,16 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
         `/v1/users/${userId}/auth/verify`,
         { ...assertion, userId, challenge: optsRes.data.challenge },
         {},
-        optsRes.cookies, // Use cookie from options response if any (often none for public)
+        sessionCookie,
         currentOrigin
       );
 
       expect(verifyRes.status).toBe(200);
       expect(verifyRes.data.verified).toBe(true);
-      
+      expect(verifyRes.cookie).toBeTruthy();
+
       // Restore session state
-      sessionCookies = verifyRes.cookies;
+      sessionCookie = verifyRes.cookie;
       csrfToken = verifyRes.data.csrf;
     });
   });
@@ -206,7 +212,7 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
       const res = await patchJson(
         `/v1/users/${userId}`,
         { userName: "hacker" },
-        { "x-csrf-token": csrfToken }, 
+        { "x-csrf-token": csrfToken },
         "", // No cookies
         currentOrigin
       );
@@ -222,10 +228,10 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
       const res = await deleteJson(
         `/v1/users/${userId}/passkeys/${credId}`,
         { "x-csrf-token": csrfToken },
-        sessionCookies,
+        sessionCookie,
         currentOrigin
       );
-      
+
       expect(res.status).toBe(200);
       // Response should indicate user is no longer verified or deleted
       // Typically 200 OK means success.
@@ -233,7 +239,7 @@ describe("QuickCrypt WebAuthn Full API Suite", () => {
 
     it("should confirm user is gone", async () => {
         // Try to fetch session or user info, should fail
-        const res = await getJson(`/v1/users/${userId}`, {}, sessionCookies, currentOrigin);
+        const res = await getJson(`/v1/users/${userId}`, {}, sessionCookie, currentOrigin);
         expect(res.status).toBeGreaterThanOrEqual(400); // 400, 401, or 404
     });
   });
