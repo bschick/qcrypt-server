@@ -46,6 +46,7 @@ You can either create a separate dev/test environment for `qcrypt-server`, as de
 
 - Create an up-to-date Ubuntu 24.04 (or similar) VM
 - (Optional) Setup an LXC container to simplify version testing by logging into the Ubuntu VM as a user with sudo permission and run the following:
+
 ```bash
 sudo sudo snap install lxd
 sudo adduser $USER lxd
@@ -54,7 +55,9 @@ lxd init --auto
 lxc launch ubuntu:24.04 qcrypt
 lxc exec qcrypt -- /bin/bash
 ```
+
 - Log into either the LXC container (exec above) or the Ubuntu VM as a user with sudo permission and run the following:
+
 ```bash
 sudo apt update && sudo apt dist-upgrade -y
 sudo apt install -y git ca-certificates
@@ -64,20 +67,27 @@ git clone https://github.com/bschick/qcrypt-server.git && cd qcrypt-server
 ```
 
 ### b. Building the Project
+
 To create a non-minimized build for debugging, run:
+
 ```bash
 npm run build
 ```
+
 For production builds, use the following command to create a minimized version:
+
 ```bash
 npm run buildmin
 ```
+
 The output will be placed in the `build/` directory.
 
 ### c. Deployment
+
 The `build/` directory will contain `index.js` and `index.zip`. To deploy, upload `index.zip` to the appropriate AWS Lambda function. This may be documented in detail later.
 
 ### d. Testing
+
 Unit and end-to-end tests for this API backend are done through the client-side web application [qcrypt github](https://github.com/bschick/qcrypt). See the [AGENTS.md file](https://raw.githubusercontent.com/bschick/qcrypt/refs/heads/main/AGENTS.md) for test execution instructions.
 
 When adding or modifying an endpoint, you must also add corresponding tests in the `qcrypt` repository.
@@ -87,7 +97,6 @@ When adding or modifying an endpoint, you must also add corresponding tests in t
 ## 5. Programmatic Checks
 
 Before submitting any changes, you must run the test suites described in section #4 and #5 in the [AGENTS.md file](https://raw.githubusercontent.com/bschick/qcrypt/refs/heads/main/AGENTS.md) of the `qcrypt` frontend to ensure that the backend is working correctly with the client.
-
 
 ---
 
@@ -100,22 +109,9 @@ Before submitting any changes, you must run the test suites described in section
 - **Error Handling:** Use the custom `ParamError` and `AuthError` classes from `src/utils.ts` for handling errors gracefully.
 - **Github workflow:** All changes must be submitted as a github pull request from a cloned repository.
 - **AWS server resources:** The test API server at `https://test.quickcrypt.org` is intended only for those contributing to the Quick Crypt project. Unnecessary or excessive usage that drives up AWS costs will be blocked.
+
 ---
 
 ## 7. API Endpoints
 
-A summary of the main HTTPS API endpoints is provided below. For detailed information on request/response formats and data models, see `API.md`.
-
-- `POST /v1/reg/options`: Start registration of a new user.
-- `POST /v1/users/{userid}/reg/verify`: Verify a passkey registration response.
-- `GET /v1/auth/options`: Get authentication options for a user.
-- `POST /v1/users/{userid}/auth/verify`: Verify an authentication response.
-- `GET /v1/users/{userid}/passkeys/options`: Get registration options to add a new passkey to an existing user.
-- `POST /v1/users/{userid}/passkeys/verify`: Verify a passkey registration response for an existing user.
-- `PATCH /v1/users/{userid}/passkeys/{credid}`: Update an authenticator's description.
-- `DELETE /v1/users/{userid}/passkeys/{credid}`: Delete an authenticator.
-- `GET /v1/users/{userid}`: Get user information.
-- `PATCH /v1/users/{userid}`: Update a username.
-- `POST /v1/users/{userid}/recover2/{recoveryid}`: Initiate account recovery.
-- `GET /v1/users/{userid}/session`: Get a user's session information.
-- `DELETE /v1/users/{userid}/session`: End a user's session.
+For detailed information on request/response formats and data models, see `API.md`.
