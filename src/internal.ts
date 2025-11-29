@@ -36,7 +36,8 @@ import {
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
-
+import sodium from 'libsodium-wrappers';
+import { base64UrlEncode } from "./utils";
 
 export async function postLoadAAGUIDs(
    httpDetails: HttpDetails
@@ -234,6 +235,24 @@ export async function postConsistency(
 export async function postMunge(
    httpDetails: HttpDetails
 ): Promise<Response> {
+
+   await sodium.ready;
+
+   const { publicKey, privateKey } = sodium.crypto_sign_keypair();
+
+   console.log(`publicKey: ${base64UrlEncode(publicKey)}`);
+   console.log(`privateKey: ${base64UrlEncode(privateKey)}`);
+
+   // https://gist.githubusercontent.com/quickcrypt-security/b5ad7deadcaf9aec23acebd0d17c6739/raw/43107c6d8f9285cee18193136b07abe52df1d1f8/keys.json
+
+   // public-key1 -- prod
+   // 2025-11-23T21:40:10.139Z	21ab5f95-21a7-4054-90a0-16b7c7e2e291	INFO	publicKey: kVyD3JMfbqWSEe4XIzwxudJIyHMmID6lg69BQCGTcZk
+   // 2025-11-23T21:40:10.140Z	21ab5f95-21a7-4054-90a0-16b7c7e2e291	INFO	privateKey: H4S7djHVYhtUPG9e2gUOSIvqPCW4xBcHKb9lT1Djlb6RXIPckx9upZIR7hcjPDG50kjIcyYgPqWDr0FAIZNxmQ
+
+   // public-key2 -- dev
+   // 2025-11-23T21:42:19.136Z	b29c2810-b30a-4f70-9d85-a59c58378b9f	INFO	publicKey: 0pbIB1B3k-oOTnMkq-41srsyiF18jms5HQKGiqS3f3c
+   // 2025-11-23T21:42:19.136Z	b29c2810-b30a-4f70-9d85-a59c58378b9f	INFO	privateKey: ig890QSJChMRLdz0jTDHLdsJ4OUgE_kpmsy33grFBO3SlsgHUHeT6g5OcySr7jWyuzKIXXyOazkdAoaKpLd_dw
+
 
    // const batchSize = 14;
 

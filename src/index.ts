@@ -26,6 +26,7 @@ if (!globalThis.URLPattern) {
    require("urlpattern-polyfill");
 }
 
+import * as cc from './consts';
 import {
    INTERNAL_VERSION,
    matchEvent,
@@ -58,7 +59,8 @@ import {
    Authenticators,
    Challenges,
    AuthEvents,
-   AAGUIDs
+   AAGUIDs,
+   SenderLinks
 } from "./models";
 
 import { ElectroError, type EntityItem, type EntityRecord } from 'electrodb';
@@ -80,8 +82,10 @@ import {
    sanitizeString,
    validB64,
    base64UrlEncode,
-   base64UrlDecode
+   base64UrlDecode,
+   CertPacker
 } from './utils';
+import sodium from 'libsodium-wrappers';
 
 type UnverifiedUserItem = EntityItem<typeof Users>;
 type VerifiedUserItem = EntityRecord<typeof Users> & {
@@ -89,6 +93,7 @@ type VerifiedUserItem = EntityRecord<typeof Users> & {
    recoveryIdEnc?: string;
 };
 type AuthItem = EntityItem<typeof Authenticators>;
+type SenderLinkItem = EntityItem<typeof SenderLinks>;
 
 type HandlerUser = {
    verifiedUser?: VerifiedUserItem,
@@ -116,6 +121,14 @@ type UserInfo = {
    userName?: string;
    hasRecoveryId?: boolean;
    authenticators?: AuthenticatorInfo[];
+};
+
+type SenderLink = {
+   receiverCert: string;
+   transportCert: string;
+   description: string;
+   senderId: string;
+   linkId: string;
 };
 
 type LoginUserInfo = UserInfo & {
@@ -154,19 +167,12 @@ enum EventNames {
    GetRecovery = 'GetRecovery',
 }
 
-const RPNAME = 'Quick Crypt';
-const ALGIDS = [24, 7, 3, 1, -7, -257];
 
-const USERID_BYTES = 16;
-const USERCRED_BYTES = 32;
-const JWTMATERIAL_BYTES = 32;
-const RECOVERYID_BYTES = 16;
-
-const KMS_KEYID_NEW = process.env.KMSKeyId_New!;
-const KMS_KEYID_BACKUP = process.env.KMSKeyId_Old!;
 const kmsClient = new KMSClient({ region: "us-east-1" });
 let jwtMaterial: Uint8Array | undefined;
 const INTERNAL_PHRASE = "Yup, I'm internal";
+
+let signingKey: Uint8Array | undefined;
 
 
 function isVerified(unverifiedUser: UnverifiedUserItem, userId: string): unverifiedUser is VerifiedUserItem {
@@ -185,11 +191,31 @@ function checkVerified(unverifiedUser: UnverifiedUserItem, userId: string): Veri
    return unverifiedUser;
 }
 
+async function createCert(
+   publicKey: Uint8Array
+): Promise<string> {
+   if (!signingKey) {
+      signingKey = await setupSigningKey();
+   }
+   // const serverPublicKey = "0pbIB1B3k-oOTnMkq-41srsyiF18jms5HQKGiqS3f3c";
+   // const serverPrivateKey = "ig890QSJChMRLdz0jTDHLdsJ4OUgE_kpmsy33grFBO3SlsgHUHeT6g5OcySr7jWyuzKIXXyOazkdAoaKpLd_dw";
+
+   const packer = new CertPacker();
+   packer.ver = cc.CERT_VERSION;
+   packer.key = publicKey;
+
+   //   console.log("signing key: ", base64UrlEncode(signingKey));
+   const signed = sodium.crypto_sign(packer.detach(), signingKey, "base64");
+   //   console.log("signed: " + signed);
+   //   const opened = sodium.crypto_sign_open(base64UrlDecode(signed)!, base64UrlDecode(serverPublicKey)!, "base64");
+   //   console.log("opened: " + opened);
+   return signed;
+}
 
 async function encryptField(
    field: Uint8Array,
    context: { [key: string]: string },
-   keyId: string = KMS_KEYID_NEW
+   keyId: string = cc.KMS_KEYID_NEW
 ): Promise<string> {
    if (!keyId) {
       throw new Error('missing kms keyid')
@@ -214,7 +240,7 @@ async function decryptField(
    fieldEnc: string,
    context: { [key: string]: string },
    expectedBytes: number,
-   keyId: string = KMS_KEYID_NEW
+   keyId: string = cc.KMS_KEYID_NEW
 ): Promise<Uint8Array> {
    if (!keyId) {
       throw new Error('missing kms keyid')
@@ -236,6 +262,29 @@ async function decryptField(
 }
 
 
+async function setupSigningKey(): Promise<Uint8Array> {
+   if (!process.env.EncSigningKey) {
+      throw new Error('missing environment value');
+   }
+
+   try {
+      const signingKey = await decryptField(
+         process.env.EncSigningKey,
+         { purpose: "Signing Key" },
+         sodium.crypto_sign_SECRETKEYBYTES
+      );
+
+      if (!signingKey) {
+         throw new Error('signing key undefined');
+      }
+      return signingKey;
+   } catch (error) {
+      console.error("signing key setup error", error);
+      throw new Error('signing key setup error');
+   }
+}
+
+
 async function setupJwtMaterial(): Promise<Uint8Array> {
    if (!process.env.EncMaterial) {
       throw new Error('missing environment value');
@@ -245,9 +294,12 @@ async function setupJwtMaterial(): Promise<Uint8Array> {
       const encodedMaterial = await decryptField(
          process.env.EncMaterial,
          { purpose: "jwt" },
-         JWTMATERIAL_BYTES
+         cc.JWTMATERIAL_BYTES
       );
 
+      if (!encodedMaterial) {
+         throw new Error('encoded material undefined');
+      }
       return encodedMaterial;
    } catch (error) {
       console.error("auth setup errror", error);
@@ -439,12 +491,12 @@ async function postAuthVerify(
       if (includeRecovery &&
          (!verifiedUser.recoveryIdEnc || verifiedUser.recoveryIdEnc.length == 0)) {
          const rand = new GenerateRandomCommand({
-            NumberOfBytes: RECOVERYID_BYTES
+            NumberOfBytes: cc.RECOVERYID_BYTES
          });
          const result = await kmsClient.send(rand);
          const recoveryId = result.Plaintext;
 
-         if (!recoveryId || recoveryId.byteLength != RECOVERYID_BYTES) {
+         if (!recoveryId || recoveryId.byteLength != cc.RECOVERYID_BYTES) {
             throw new Error("GenerateRandomCommand failure");
          }
 
@@ -538,7 +590,7 @@ async function _doPostRegVerify(
          expectedChallenge: challenge.data.challenge,
          expectedOrigin: rpOrigin,
          expectedRPID: rpID,
-         supportedAlgorithmIDs: ALGIDS
+         supportedAlgorithmIDs: cc.ALGIDS
       });
    } catch (err) {
       console.error(err);
@@ -601,7 +653,7 @@ async function _doPostRegVerify(
       }
 
       const rparams = {
-         NumberOfBytes: USERCRED_BYTES + RECOVERYID_BYTES
+         NumberOfBytes: cc.USERCRED_BYTES + cc.RECOVERYID_BYTES
       };
       const rand = new GenerateRandomCommand(rparams);
       const result = await kmsClient.send(rand);
@@ -621,7 +673,7 @@ async function _doPostRegVerify(
             throw new Error('unexpected user credential or recovery id');
          }
 
-         const userCred = randData.slice(0, USERCRED_BYTES);
+         const userCred = randData.slice(0, cc.USERCRED_BYTES);
          const userCredEnc = await encryptField(
             userCred,
             { userId: unverifiedUser.userId }
@@ -630,10 +682,10 @@ async function _doPostRegVerify(
          const userCredEncBackup = await encryptField(
             userCred,
             { userId: unverifiedUser.userId },
-            KMS_KEYID_BACKUP
+            cc.KMS_KEYID_BACKUP
          );
 
-         const recoveryId = randData.slice(USERCRED_BYTES);
+         const recoveryId = randData.slice(cc.USERCRED_BYTES);
          const recoveryIdEnc = await encryptField(
             recoveryId,
             { userId: unverifiedUser.userId }
@@ -698,6 +750,294 @@ async function _doPostRegVerify(
    };
 }
 
+async function postSenderLinks(
+   httpDetails: HttpDetails,
+   handlerUser: HandlerUser
+): Promise<Response> {
+   const {
+      body
+   } = httpDetails;
+
+   const verifiedUser = handlerUser.verifiedUser;
+   if (!verifiedUser) {
+      throw new AuthError();
+   }
+   const description = sanitizeString(body.description);
+   if (description.length < 6 || description.length > 55) {
+      throw new ParamError('description must more than 5 and less than 56 character');
+   }
+
+   if (!validB64(body.publicKey)) {
+      throw new ParamError('invalid publicKey');
+   }
+   const senderId = body.senderId ?? "";
+   if (senderId !== "" && !validB64(senderId)) {
+      throw new ParamError('invalid senderId');
+   }
+
+   const multiUse = body.multiUse ?? false;
+   let linkId: string | undefined;
+
+   const rparams = {
+      NumberOfBytes: cc.LINKID_BYTES * cc.RETRIES
+   };
+   const rand = new GenerateRandomCommand(rparams);
+   const result = await kmsClient.send(rand);
+
+   const randData = result.Plaintext;
+   if (!randData || randData.byteLength != rparams.NumberOfBytes) {
+      throw new Error("GenerateRandomCommand failure");
+   }
+
+   // Loop in the very unlikley event that we randomly pick
+   // a duplicate (out of 3.4e38 possible)
+   for (let i = 0; i < cc.RETRIES; ++i) {
+      const linkIdBytes = randData.slice(i * cc.LINKID_BYTES, (i + 1) * cc.LINKID_BYTES);
+      linkId = base64UrlEncode(linkIdBytes)!;
+      // console.log(`linkId: ${linkId}`);
+
+      const links = await SenderLinks.query.byLinkId({
+         linkId: linkId
+      }).go();
+
+      if (!links || links.data.length == 0) {
+         break;
+      } else {
+         linkId = undefined;
+      }
+   }
+
+   if (!linkId) {
+      throw new Error('could not allocate linkId');
+   }
+
+   const { publicKey, privateKey } = sodium.crypto_kx_keypair();
+   const transportCert = await createCert(publicKey);
+   const receiverCert = await createCert(base64UrlDecode(body.publicKey)!);
+
+   try {
+      const link = await SenderLinks.create({
+         linkId,
+         senderId,
+         receiverId: verifiedUser.userId,
+         description,
+         receiverCert,
+         transportCert,
+         multiUse,
+         transportPrivateKey: base64UrlEncode(privateKey)!,
+      }).go();
+
+      if (!link || !link.data) {
+         throw new ParamError('could not create sender link');
+      }
+
+      const response = makeSenderLinkResponse(link.data);
+      return { content: response };
+   } catch (err) {
+      if (err instanceof ElectroError) {
+         throw new ParamError('could not create sender link');
+      }
+      throw err;
+   }
+}
+
+async function postSenderLinkVerify(
+   httpDetails: HttpDetails,
+   handlerUser: HandlerUser
+): Promise<Response> {
+   const {
+      body,
+      resources
+   } = httpDetails;
+
+   const verifiedUser = handlerUser.verifiedUser;
+   if (!verifiedUser) {
+      throw new AuthError();
+   }
+   if (!validB64(body.eep)) {
+      throw new ParamError('invalid eep');
+   }
+   if (!validB64(resources.linkid)) {
+      throw new ParamError('invalid linkid');
+   }
+   const senderId = body.senderId ?? "";
+   if (senderId !== "" && !validB64(senderId)) {
+      throw new ParamError('invalid senderId');
+   }
+
+   try {
+      const patched = await SenderLinks.patch({
+         linkId: resources.linkid,
+         senderId: senderId,
+      }).set({
+         eep: body.eep
+      }).where(
+         (attr, op) => op.eq(attr.receiverId, verifiedUser.userId)
+      ).go();
+
+      if (!patched || !patched.data) {
+         throw new ParamError('could not verify sender link');
+      }
+
+      const response = makeSenderLinkResponse(patched.data as SenderLinkItem);
+      return { content: response };
+   } catch (err) {
+      if (err instanceof ElectroError) {
+         throw new ParamError('sender link verify failed');
+      }
+      throw err;
+   }
+
+}
+
+async function patchSenderLink(
+   httpDetails: HttpDetails,
+   handlerUser: HandlerUser
+): Promise<Response> {
+   const {
+      body,
+      resources
+   } = httpDetails;
+
+   const verifiedUser = handlerUser.verifiedUser;
+   if (!verifiedUser) {
+      throw new AuthError();
+   }
+   if (!validB64(resources.linkid)) {
+      throw new ParamError('invalid linkid');
+   }
+   const description = sanitizeString(body.description);
+   if (description.length < 6 || description.length > 55) {
+      throw new ParamError('description must more than 5 and less than 56 character');
+   }
+   const senderId = body.senderId ?? "";
+   if (senderId !== "" && !validB64(senderId)) {
+      throw new ParamError('invalid senderId');
+   }
+
+   try {
+      const patched = await SenderLinks.patch({
+         linkId: resources.linkid,
+         senderId: senderId,
+      }).set({
+         description
+      }).where(
+         (attr, op) => op.eq(attr.receiverId, verifiedUser.userId)
+      ).go();
+
+      if (!patched || !patched.data) {
+         throw new ParamError('could not update sender link');
+      }
+   } catch (err) {
+      if (err instanceof ElectroError) {
+         throw new ParamError('sender link update failed');
+      }
+      throw err;
+   }
+
+   return { content: { linkId: resources.linkid } };
+}
+
+async function deleteSenderLink(
+   httpDetails: HttpDetails,
+   handlerUser: HandlerUser
+): Promise<Response> {
+   const {
+      resources
+   } = httpDetails;
+
+   const verifiedUser = handlerUser.verifiedUser;
+   if (!verifiedUser) {
+      throw new AuthError();
+   }
+   if (!validB64(resources.linkid)) {
+      throw new ParamError('invalid linkid');
+   }
+
+   try {
+      const deleted = await SenderLinks.delete({
+         receiverId: verifiedUser.userId,
+         linkId: resources.linkid
+      }).go();
+
+      if (!deleted || !deleted.data) {
+         throw new ParamError('could not delete sender link');
+      }
+   } catch (err) {
+      if (err instanceof ElectroError) {
+         throw new ParamError('sender link delete failed');
+      }
+      throw err;
+   }
+
+   return { content: { success: true } };
+}
+
+async function getSenderLink(
+   httpDetails: HttpDetails,
+   handlerUser: HandlerUser
+): Promise<Response> {
+   const {
+      resources
+   } = httpDetails;
+
+   const verifiedUser = handlerUser.verifiedUser;
+   if (!verifiedUser) {
+      throw new AuthError();
+   }
+   if (!validB64(resources.linkid)) {
+      throw new ParamError('invalid linkid');
+   }
+
+   try {
+      // First check if there is a link for this user
+      let link = await SenderLinks.get({
+         linkId: resources.linkid,
+         senderId: verifiedUser.userId
+      }).go();
+
+      if (!link || !link.data) {
+         // Next check if there is an unbound link
+         link = await SenderLinks.get({
+            linkId: resources.linkid,
+            senderId: ""
+         }).go();
+      }
+
+      if (!link || !link.data) {
+         throw new ParamError('could not get sender link');
+      }
+
+      // If link was not bound, bind it now.
+      if (!link.data.senderId) {
+         // Multi-use links cloned each time a new sender makes a request
+         if (link.data.multiUse) {
+            link = await SenderLinks.clone({
+               linkId: resources.linkid,
+               senderId: verifiedUser.userId
+            }).go();
+         }
+         throw new ParamError('could not get sender link');
+      }
+
+      return {
+         content: {
+            linkId: link.linkId,
+            receiverCert: link.receiverCert,
+            transportCert: link.transportCert,
+            senderId: link.senderId,
+            eep: link.eep
+         }
+      };
+   } catch (err) {
+      if (err instanceof ElectroError) {
+         throw new ParamError('sender link get failed');
+      }
+      throw err;
+   }
+
+   return { content: { success: true } };
+}
 
 async function getAuthOptions(
    httpDetails: HttpDetails
@@ -794,12 +1134,10 @@ async function postRegOptions(
 
    let uId: string | undefined;
 
-   const RETRIES = 3;
-
    // Reduce round-trips by getting enough data for 3 x 16 bytes ID tries
    // and 1 x 32 bytes userCred
    const rparams = {
-      NumberOfBytes: RETRIES * USERID_BYTES
+      NumberOfBytes: cc.RETRIES * cc.USERID_BYTES
    };
    const rand = new GenerateRandomCommand(rparams);
    const result = await kmsClient.send(rand);
@@ -811,8 +1149,8 @@ async function postRegOptions(
 
    // Loop in the very unlikley event that we randomly pick
    // a duplicate (out of 3.4e38 possible)
-   for (let i = 0; i < RETRIES; ++i) {
-      const uIdBytes = randData.slice(i * USERID_BYTES, (i + 1) * USERID_BYTES);
+   for (let i = 0; i < cc.RETRIES; ++i) {
+      const uIdBytes = randData.slice(i * cc.USERID_BYTES, (i + 1) * cc.USERID_BYTES);
       uId = base64UrlEncode(uIdBytes)!;
 
       const users = await Users.query.byUserId({
@@ -877,7 +1215,7 @@ async function registrationOptions(
       }
 
       const options: PublicKeyCredentialCreationOptionsJSON = await generateRegistrationOptions({
-         rpName: RPNAME,
+         rpName: cc.RPNAME,
          rpID: rpID,
          userID: base64UrlDecode(unverifiedUser.userId),
          userName: unverifiedUser.userName,
@@ -887,7 +1225,7 @@ async function registrationOptions(
             residentKey: 'required',
             userVerification: 'preferred',
          },
-         supportedAlgorithmIDs: ALGIDS,
+         supportedAlgorithmIDs: cc.ALGIDS,
       });
 
       await Challenges.create({
@@ -896,8 +1234,6 @@ async function registrationOptions(
 
       // Let this happen async
       recordEvent(EventNames.RegOptions, unverifiedUser.userId);
-      //@ts-ignore
-      options.rp['origin'] = rpOrigin;
       return { content: options };
    } catch (err) {
       console.error(err);
@@ -920,7 +1256,7 @@ async function makeLoginUserInfoResponse(
          userCred = await decryptField(
             verifiedUser.userCredEnc,
             { userId: verifiedUser.userId },
-            USERCRED_BYTES
+            cc.USERCRED_BYTES
          );
       }
 
@@ -929,7 +1265,7 @@ async function makeLoginUserInfoResponse(
          recoveryId = await decryptField(
             verifiedUser.recoveryIdEnc,
             { userId: verifiedUser.userId },
-            RECOVERYID_BYTES
+            cc.RECOVERYID_BYTES
          );
       }
 
@@ -967,6 +1303,17 @@ async function makeUserInfoResponse(
    return userInfo;
 }
 
+function makeSenderLinkResponse(
+   senderLink: SenderLinkItem
+): SenderLink {
+   return {
+      receiverCert: senderLink.receiverCert,
+      transportCert: senderLink.transportCert,
+      description: senderLink.description,
+      senderId: senderLink.senderId,
+      linkId: senderLink.linkId
+   };
+}
 
 async function patchPasskey(
    httpDetails: HttpDetails,
@@ -1024,7 +1371,7 @@ async function patchPasskey(
 }
 
 
-async function patchUserInfo(
+async function patchUser(
    httpDetails: HttpDetails,
    handlerUser: HandlerUser
 ): Promise<Response> {
@@ -1043,14 +1390,21 @@ async function patchUserInfo(
       throw new ParamError('username must more than 5 and less than 32 character');
    }
 
-   const patched = await Users.patch({
-      userId: verifiedUser.userId
-   }).set({
-      userName: userName
-   }).go();
+   try {
+      const patched = await Users.patch({
+         userId: verifiedUser.userId
+      }).set({
+         userName: userName
+      }).go();
 
-   if (!patched || !patched.data) {
-      throw new ParamError('username update failed');
+      if (!patched || !patched.data) {
+         throw new ParamError('username update failed');
+      }
+   } catch (err) {
+      if (err instanceof ElectroError) {
+         throw new ParamError('username update failed');
+      }
+      throw err;
    }
 
    // Let this happen async
@@ -1065,7 +1419,7 @@ async function patchUserInfo(
 
 // Not tracking events for this method since they are frequent and not particlyarly
 // interesting
-async function getUserInfo(
+async function getUser(
    httpDetails: HttpDetails,
    handlerUser: HandlerUser
 ): Promise<Response> {
@@ -1245,7 +1599,7 @@ async function postRecover(
    const userCredDecBytes = await decryptField(
       verifiedUser.userCredEnc,
       { userId: verifiedUser.userId },
-      USERCRED_BYTES
+      cc.USERCRED_BYTES
    );
 
    if (base64UrlEncode(userCredDecBytes) !== userCred) {
@@ -1322,7 +1676,7 @@ async function postRecover2(
    const recoveryIdDecBytes = await decryptField(
       verifiedUser.recoveryIdEnc,
       { userId: verifiedUser.userId },
-      RECOVERYID_BYTES
+      cc.RECOVERYID_BYTES
    );
 
    if (base64UrlEncode(recoveryIdDecBytes) !== recoveryId) {
@@ -1445,10 +1799,10 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
    const token = sign(
       payload,
       jwtKey, {
-         algorithm: 'HS512',
-         expiresIn: expiresIn,
-         issuer: 'quickcrypt'
-      }
+      algorithm: 'HS512',
+      expiresIn: expiresIn,
+      issuer: 'quickcrypt'
+   }
    );
 
    const cookie = `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=${expiresIn}`
@@ -1487,9 +1841,9 @@ async function verifyCookie(
       payload = verify(
          token,
          jwtKey, {
-            algorithms: ['HS512'],
-            issuer: 'quickcrypt'
-         }
+         algorithms: ['HS512'],
+         issuer: 'quickcrypt'
+      }
       ) as JwtPayload;
 
    } catch (err) {
@@ -1602,11 +1956,12 @@ export async function handler(event: any, context: any) {
 const METHODMAP: MethodMap = {
    GET: [
       { name: 'getAuthOptions', pattern: Patterns.authOptions, version: 1, authorize: false, handler: getAuthOptions },
-      { name: 'getUserInfo', pattern: Patterns.userInfo, version: 1, authorize: true, handler: getUserInfo },
+      { name: 'getUser', pattern: Patterns.user, version: 1, authorize: true, handler: getUser },
       { name: 'getPasskeyOptions', pattern: Patterns.userPasskeyOptions, version: 1, authorize: true, handler: getPasskeyOptions },
       // Special case of an authenticated method that does not require csrf. Needed so GET session works in a fresh
       // tab/window, and should be safe since csrf isn't technically needed for GET calls due to Same-Origin
       { name: 'getUserSession', pattern: Patterns.userSession, version: 1, authorize: true, checkCsrf: false, handler: getUserSession },
+      { name: 'getSenderLink', pattern: Patterns.senderLink, version: 1, authorize: true, handler: getSenderLink },
    ],
    POST: [
       { name: 'postAuthVerify', pattern: Patterns.authVerify, version: 1, authorize: false, handler: postAuthVerify },
@@ -1615,6 +1970,10 @@ const METHODMAP: MethodMap = {
       { name: 'postRecover', pattern: Patterns.userRecover, version: 1, authorize: false, handler: postRecover },
       { name: 'postRecover2', pattern: Patterns.userRecover2, version: 1, authorize: false, handler: postRecover2 },
       { name: 'postUserPasskeyVerify', pattern: Patterns.userPasskeyVerify, version: 1, authorize: false, handler: postUserPasskeyVerify },
+
+      // Sender links
+      { name: 'postSenderLinks', pattern: Patterns.senderLinks, version: 1, authorize: true, handler: postSenderLinks },
+      { name: 'postSenderLinkVerify', pattern: Patterns.senderLinkVerify, version: 1, authorize: true, handler: postSenderLinkVerify },
 
       // Internal only endpoints that are not exposed in cloudfront and require special auth
       { name: 'postMunge', pattern: Patterns.munge, version: INTERNAL_VERSION, authorize: false, handler: postMunge },
@@ -1625,10 +1984,13 @@ const METHODMAP: MethodMap = {
    ],
    PATCH: [
       { name: 'patchPasskey', pattern: Patterns.userPasskey, version: 1, authorize: true, handler: patchPasskey },
-      { name: 'patchUserInfo', pattern: Patterns.userInfo, version: 1, authorize: true, handler: patchUserInfo },
+      { name: 'patchUser', pattern: Patterns.user, version: 1, authorize: true, handler: patchUser },
+      { name: 'patchSenderLink', pattern: Patterns.senderLink, version: 1, authorize: true, handler: patchSenderLink },
    ],
    DELETE: [
       { name: 'deletePasskey', pattern: Patterns.userPasskey, version: 1, authorize: true, handler: deletePasskey },
       { name: 'deleteUserSession', pattern: Patterns.userSession, version: 1, authorize: true, handler: deleteUserSession },
+      { name: 'deleteSenderLink', pattern: Patterns.senderLink, version: 1, authorize: true, handler: deleteSenderLink },
    ],
 };
+

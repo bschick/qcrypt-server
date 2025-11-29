@@ -1,9 +1,11 @@
 {
   "compilerOptions": {
     "target": "es2022",
-    "lib": ["es2022"],
+    "lib": [
+      "es2022"
+    ],
     "moduleDetection": "force",
-//    "module": "commonjs",
+    //    "module": "commonjs",
     "module": "ES2022",
     "moduleResolution": "node",
     "noEmit": true,
@@ -15,6 +17,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true
   }
 }

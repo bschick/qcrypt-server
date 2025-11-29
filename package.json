@@ -7,7 +7,7 @@
   "scripts": {
     "test": "jasmine",
     "test:prod": "QC_ENV=prod jasmine",
-    "build":    "esbuild --bundle          --platform=node --target=es2022 --outdir=build src/index.ts && rm -f ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js ./assets/aaguid/combined.json",
+    "build": "esbuild --bundle          --platform=node --target=es2022 --outdir=build src/index.ts && rm -f ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js ./assets/aaguid/combined.json",
     "buildmin": "esbuild --bundle --minify --platform=node --target=es2022 --outdir=build src/index.ts && rm -f ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js ./assets/aaguid/combined.json"
   },
   "author": "",
@@ -16,13 +16,14 @@
     "@aws-sdk/types": "^3.840.0",
     "@types/jasmine": "^5.1.13",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/libsodium-wrappers": "^0.7.14",
     "@types/node": "^24.10.1",
     "esbuild": "^0.27.0",
     "jasmine": "^5.12.0",
     "jasmine-ts": "^0.4.0",
+    "nid-webauthn-emulator": "^0.2.8",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3",
-    "nid-webauthn-emulator": "^0.2.8"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.840.0",
@@ -30,6 +31,7 @@
     "@simplewebauthn/server": "^13.0.0",
     "electrodb": "^3.4.0",
     "jsonwebtoken": "^9.0.2",
+    "libsodium-wrappers": "^0.7.15",
     "urlpattern-polyfill": "^10.1.0",
     "xss": "^1.0.15"
   }

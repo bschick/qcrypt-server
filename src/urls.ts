@@ -82,7 +82,7 @@ export const Patterns = {
    authVerify: new URLPattern({
       pathname: '/v:ver/users/:userid/auth/verify',
    }),
-   userInfo: new URLPattern({
+   user: new URLPattern({
       pathname: `/v:ver/users/:userid`,
    }),
    userRecover: new URLPattern({
@@ -104,6 +104,17 @@ export const Patterns = {
    }),
    userPasskey: new URLPattern({
       pathname: `/v:ver/users/:userid/passkeys/:credid`
+   }),
+
+   // Sender Link patterns
+   senderLinks: new URLPattern({
+      pathname: `/v:ver/users/:userid/senderlinks`
+   }),
+   senderLinkVerify: new URLPattern({
+      pathname: `/v:ver/users/:userid/senderlinks/:linkid/verify`
+   }),
+   senderLink: new URLPattern({
+      pathname: `/v:ver/users/:userid/senderlinks/:linkid`
    }),
 
    // Internal only URLS (not allowed through Cloudfront)
