@@ -21,6 +21,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE. */
 
 import { base64Decode, NotFoundError, ParamError } from "./utils";
+import type { VerifiedUserItem } from "./models";
 
 // Once we upgrade to node 24, this can be changed to import Urlpattern
 if (!globalThis.URLPattern) {
@@ -32,9 +33,10 @@ export const INTERNAL_VERSION = 0;
 export type Method = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 export type Version = typeof INTERNAL_VERSION | 1;
 
+
 type HttpHandler = (
    httpDetails: HttpDetails,
-   options: Record<string, any>
+   verifiedUser?: VerifiedUserItem,
 ) => any
 
 export type HttpDetails = {
@@ -69,41 +71,63 @@ const hostname = '{*.}?quickcrypt.org'
 // a failed match.
 //const b64Chars = '[A-Za-z0-9+/=_-]';
 
+// The X suffix is for temporary backward compatibility, remove after client updates
 export const Patterns = {
    regOptions: new URLPattern({
       pathname: '/v:ver/reg/options',
    }),
-   regVerify: new URLPattern({
+   regVerifyX: new URLPattern({
       pathname: '/v:ver/users/:userid/reg/verify',
+   }),
+   regVerify: new URLPattern({
+      pathname: '/v:ver/reg/verify',
    }),
    authOptions: new URLPattern({
       pathname: '/v:ver/auth/options',
    }),
-   authVerify: new URLPattern({
+   authVerifyX: new URLPattern({
       pathname: '/v:ver/users/:userid/auth/verify',
    }),
-   user: new URLPattern({
+   authVerify: new URLPattern({
+      pathname: '/v:ver/auth/verify',
+   }),
+   userInfoX: new URLPattern({
       pathname: `/v:ver/users/:userid`,
    }),
-   userRecover: new URLPattern({
+   user: new URLPattern({
+      pathname: `/v:ver/user`,
+   }),
+   recover: new URLPattern({
       pathname: `/v:ver/users/:userid/recover/:usercred`,
    }),
-   userRecover2: new URLPattern({
+   recover2: new URLPattern({
       pathname: `/v:ver/users/:userid/recover2/:recoveryid`,
    }),
-   userSession: new URLPattern({
+   userSessionX: new URLPattern({
       pathname: `/v:ver/users/:userid/session`,
    }),
+   session: new URLPattern({
+      pathname: `/v:ver/session`,
+   }),
    // Must search options and verify before passkey/:authid
-   userPasskeyOptions: new URLPattern({
+   userPasskeyOptionsX: new URLPattern({
       pathname: `/v:ver/users/:userid/passkeys/options`,
    }),
+   passkeyOptions: new URLPattern({
+      pathname: `/v:ver/passkeys/options`,
+   }),
    // Must seach options and verify before passkey/:authid
-   userPasskeyVerify: new URLPattern({
+   userPasskeyVerifyX: new URLPattern({
       pathname: `/v:ver/users/:userid/passkeys/verify`,
    }),
-   userPasskey: new URLPattern({
+   passkeyVerify: new URLPattern({
+      pathname: `/v:ver/passkeys/verify`,
+   }),
+   userPasskeyX: new URLPattern({
       pathname: `/v:ver/users/:userid/passkeys/:credid`
+   }),
+   passkey: new URLPattern({
+      pathname: `/v:ver/passkeys/:credid`
    }),
 
    // Sender Link patterns

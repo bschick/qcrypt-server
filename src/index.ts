@@ -60,7 +60,10 @@ import {
    Challenges,
    AuthEvents,
    AAGUIDs,
-   SenderLinks
+   SenderLinks,
+   type VerifiedUserItem,
+   type UnverifiedUserItem,
+   type AuthItem,
 } from "./models";
 
 import { ElectroError, type EntityItem, type EntityRecord } from 'electrodb';
@@ -86,19 +89,6 @@ import {
    CertPacker
 } from './utils';
 import sodium from 'libsodium-wrappers';
-
-type UnverifiedUserItem = EntityItem<typeof Users>;
-type VerifiedUserItem = EntityRecord<typeof Users> & {
-   lastCredentialId?: string;
-   recoveryIdEnc?: string;
-};
-type AuthItem = EntityItem<typeof Authenticators>;
-type SenderLinkItem = EntityItem<typeof SenderLinks>;
-
-type HandlerUser = {
-   verifiedUser?: VerifiedUserItem,
-   unverifiedUser?: UnverifiedUserItem,
-}
 
 export type Response = {
    content: Record<string, any>;
@@ -330,12 +320,11 @@ async function recordEvent(
    }
 }
 
-async function getUserSession(
+async function getSession(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -353,12 +342,11 @@ async function getUserSession(
 }
 
 
-async function deleteUserSession(
+async function deleteSession(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -383,15 +371,11 @@ async function postAuthVerify(
       rpID,
       rpOrigin,
       params,
-      body,
-      resources,
+      body
    } = httpDetails;
 
    if (!body.response || !body.response.userHandle) {
       throw new ParamError('missing userHandle');
-   }
-   if (resources.userid !== body.response.userHandle) {
-      throw new ParamError('mismatched userId');
    }
    if (!validB64(body.id)) {
       throw new ParamError('invalid authenticatorId');
@@ -530,7 +514,7 @@ async function postAuthVerify(
    };
 }
 
-async function postUserPasskeyVerify(
+async function postPasskeyVerify(
    httpDetails: HttpDetails
 ): Promise<Response> {
    return _doPostRegVerify(httpDetails, false);
@@ -550,13 +534,9 @@ async function _doPostRegVerify(
       rpID,
       rpOrigin,
       params,
-      body,
-      resources,
+      body
    } = httpDetails;
 
-   if (resources.userid !== body.userId) {
-      throw new ParamError('mismatched userId');
-   }
    if (!validB64(body.challenge)) {
       throw new ParamError('invalid challenge format');
    }
@@ -752,13 +732,12 @@ async function _doPostRegVerify(
 
 async function postSenderLinks(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
    const {
       body
    } = httpDetails;
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -843,14 +822,13 @@ async function postSenderLinks(
 
 async function postSenderLinkVerify(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
    const {
       body,
       resources
    } = httpDetails;
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -892,14 +870,13 @@ async function postSenderLinkVerify(
 
 async function patchSenderLink(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
    const {
       body,
       resources
    } = httpDetails;
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -940,13 +917,12 @@ async function patchSenderLink(
 
 async function deleteSenderLink(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
    const {
       resources
    } = httpDetails;
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -975,13 +951,12 @@ async function deleteSenderLink(
 
 async function getSenderLink(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
    const {
       resources
    } = httpDetails;
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -1101,14 +1076,13 @@ async function getAuthOptions(
 
 async function getPasskeyOptions(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
    const {
       rpID,
       rpOrigin
    } = httpDetails;
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -1317,14 +1291,13 @@ function makeSenderLinkResponse(
 
 async function patchPasskey(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
    const {
       resources,
       body,
    } = httpDetails;
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -1373,13 +1346,12 @@ async function patchPasskey(
 
 async function patchUser(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
    const {
       body
    } = httpDetails;
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -1421,10 +1393,9 @@ async function patchUser(
 // interesting
 async function getUser(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -1437,10 +1408,9 @@ async function getUser(
 // interesting
 async function getAuthenticators(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser: VerifiedUserItem
 ): Promise<Response> {
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -1514,13 +1484,12 @@ async function loadAuthenticators(
 
 async function deletePasskey(
    httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
    const {
       resources
    } = httpDetails;
 
-   const verifiedUser = handlerUser.verifiedUser;
    if (!verifiedUser) {
       throw new AuthError();
    }
@@ -1573,8 +1542,7 @@ async function deletePasskey(
 // process or creating a new passkey. Caller is expected to followup
 // with a call to verifyRegistration
 async function postRecover(
-   httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   httpDetails: HttpDetails
 ): Promise<Response> {
    const {
       rpID,
@@ -1586,11 +1554,10 @@ async function postRecover(
    if (!validB64(userCred)) {
       throw new ParamError('invalid user credential');
    }
+
    // Require an existing verified user for recovery
-   if (!handlerUser.unverifiedUser) {
-      throw new AuthError();
-   }
-   const verifiedUser = checkVerified(handlerUser.unverifiedUser, resources.userid);
+   const unverifiedUser = await getUnverifiedUser(resources.userid);
+   const verifiedUser = checkVerified(unverifiedUser, resources.userid);
 
    if (verifiedUser.recoveryIdEnc && verifiedUser.recoveryIdEnc.length > 1) {
       throw new ParamError('must use recovery words instead');
@@ -1602,6 +1569,7 @@ async function postRecover(
       cc.USERCRED_BYTES
    );
 
+   // Critical check to ensure we do not recover the wrong user
    if (base64UrlEncode(userCredDecBytes) !== userCred) {
       // vague error to make guessing harder
       throw new AuthError();
@@ -1648,8 +1616,7 @@ async function postRecover(
 // process or creating a new passkey. Caller is expected to followup
 // with a call to verifyRegistration
 async function postRecover2(
-   httpDetails: HttpDetails,
-   handlerUser: HandlerUser
+   httpDetails: HttpDetails
 ): Promise<Response> {
    const {
       rpID,
@@ -1662,15 +1629,13 @@ async function postRecover2(
       throw new ParamError('invalid recovery id');
    }
    // Require an existing verified user for recovery
-   if (!handlerUser.unverifiedUser) {
-      throw new AuthError();
-   }
-   const verifiedUser = checkVerified(handlerUser.unverifiedUser, resources.userid);
+   const unverifiedUser = await getUnverifiedUser(resources.userid);
+   const verifiedUser = checkVerified(unverifiedUser, resources.userid);
 
    // due to switch from recover to recover2, not all verified users have recoveryIdEnc
    if (!verifiedUser.recoveryIdEnc ||
       verifiedUser.recoveryIdEnc.length < 10) {
-      throw new ParamError('invalid recovery id'); // vague on purpose
+      throw new ParamError('account not upgraded');
    }
 
    const recoveryIdDecBytes = await decryptField(
@@ -1679,8 +1644,9 @@ async function postRecover2(
       cc.RECOVERYID_BYTES
    );
 
+   // Critical check to ensure we do not recover the wrong user
    if (base64UrlEncode(recoveryIdDecBytes) !== recoveryId) {
-      throw new ParamError('invalid recovery id'); // vague on purpose
+      throw new ParamError('invalid recovery id');
    }
 
    const auths = await Authenticators.query.byUserId({
@@ -1792,17 +1758,18 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
    const jwtKey = await getSessionKey(verifiedUser, "jwt_key");
 
    const payload = {
-      pkId: verifiedUser.lastCredentialId
+      pkId: verifiedUser.lastCredentialId,
+      userId: verifiedUser.userId
    };
 
    const expiresIn = 10800;
    const token = sign(
       payload,
       jwtKey, {
-      algorithm: 'HS512',
-      expiresIn: expiresIn,
-      issuer: 'quickcrypt'
-   }
+         algorithm: 'HS512',
+         expiresIn: expiresIn,
+         issuer: 'quickcrypt'
+      }
    );
 
    const cookie = `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=${expiresIn}`
@@ -1823,44 +1790,53 @@ async function verifyCsrf(
 }
 
 async function verifyCookie(
-   unverifiedUser: UnverifiedUserItem,
    cookie: string
 ): Promise<VerifiedUserItem> {
 
-   const match = /^__Host-JWT=(.+)$/.exec(cookie);
-   if (!match || !match[1] || match[1].length < 10) {
-      throw new AuthError();
-   }
-   const token = match[1];
-
-   const jwtKey = await getSessionKey(unverifiedUser, "jwt_key");
-   let payload: JwtPayload;
-
-   // Internally verifies exp date set with expiresIn during cookie creation
    try {
+      const match = /^__Host-JWT=(.+)$/.exec(cookie);
+      if (!match || !match[1] || match[1].length < 10) {
+         throw new Error('invalid cookie');
+      }
+      const token = match[1];
+
+      let payload = decode(
+         token, {
+         json: true,
+         complete: false
+      });
+
+      if (!payload || !payload.userId) {
+         throw new Error('invalid cookie');
+      }
+
+      const unverifiedUser = await getUnverifiedUser(payload.userId);
+      const jwtKey = await getSessionKey(unverifiedUser, "jwt_key");
+
+      // Internally verifies exp date set with expiresIn during cookie creation
       payload = verify(
          token,
          jwtKey, {
-         algorithms: ['HS512'],
-         issuer: 'quickcrypt'
+            algorithms: ['HS512'],
+            issuer: 'quickcrypt',
+            complete: false
+      }) as JwtPayload;
+
+      // lastCredentialId is cleared on logout so cookie is invalid after logout
+      if (!payload ||
+         !payload.pkId ||
+         payload.pkId !== unverifiedUser.lastCredentialId ||
+         payload.iss !== 'quickcrypt'
+      ) {
+         throw new Error('invalid cookie');
       }
-      ) as JwtPayload;
+
+      return checkVerified(unverifiedUser, payload.userId);
 
    } catch (err) {
       console.error(err);
       throw new AuthError();
    }
-
-   // lastCredentialId is cleared on logout so cookie is invalid after logout
-   if (!payload ||
-      !payload.pkId ||
-      payload.pkId !== unverifiedUser.lastCredentialId ||
-      payload.iss !== 'quickcrypt'
-   ) {
-      throw new AuthError();
-   }
-
-   return checkVerified(unverifiedUser, unverifiedUser.userId);
 }
 
 
@@ -1892,21 +1868,16 @@ export async function handler(event: any, context: any) {
       console.log(`calling function: ${httpDetails.name}, authorize: ${httpDetails.authorize}`);
       console.log(`rpID: ${httpDetails.rpID}, rpOrigin: ${httpDetails.rpOrigin}`);
 
-      let unverifiedUser: UnverifiedUserItem | undefined;
       let verifiedUser: VerifiedUserItem | undefined;
 
-      if (httpDetails.resources.userid) {
-         unverifiedUser = await getUnverifiedUser(httpDetails.resources.userid);
-      }
-
       if (httpDetails.authorize) {
-         if (!httpDetails.cookie || !unverifiedUser) {
+         if (!httpDetails.cookie) {
             throw new AuthError();
          }
          const headerCsrf = event['headers']['x-csrf-token'];
 
          // these throw an exception if cookie or headerCsrf is invalid
-         verifiedUser = await verifyCookie(unverifiedUser, httpDetails.cookie);
+         verifiedUser = await verifyCookie(httpDetails.cookie);
          await verifyCsrf(verifiedUser, httpDetails.checkCsrf, headerCsrf);
       }
 
@@ -1921,10 +1892,7 @@ export async function handler(event: any, context: any) {
          }
       }
 
-      let response = await httpDetails.handler(httpDetails, {
-         verifiedUser: verifiedUser,
-         unverifiedUser: unverifiedUser
-      });
+      let response = await httpDetails.handler(httpDetails, verifiedUser);
 
       let respCookie: string | undefined;
       if (response.startSession) {
@@ -1952,24 +1920,35 @@ export async function handler(event: any, context: any) {
    }
 }
 
+// The X suffix is for temporary backward compatibility, remove after client updates
 
 const METHODMAP: MethodMap = {
    GET: [
       { name: 'getAuthOptions', pattern: Patterns.authOptions, version: 1, authorize: false, handler: getAuthOptions },
       { name: 'getUser', pattern: Patterns.user, version: 1, authorize: true, handler: getUser },
-      { name: 'getPasskeyOptions', pattern: Patterns.userPasskeyOptions, version: 1, authorize: true, handler: getPasskeyOptions },
+      { name: 'getPasskeyOptions', pattern: Patterns.passkeyOptions, version: 1, authorize: true, handler: getPasskeyOptions },
       // Special case of an authenticated method that does not require csrf. Needed so GET session works in a fresh
       // tab/window, and should be safe since csrf isn't technically needed for GET calls due to Same-Origin
-      { name: 'getUserSession', pattern: Patterns.userSession, version: 1, authorize: true, checkCsrf: false, handler: getUserSession },
+      { name: 'getSession', pattern: Patterns.session, version: 1, authorize: true, checkCsrf: false, handler: getSession },
+
+      // old for backward compatibility
+      { name: 'getUserInfoX', pattern: Patterns.userInfoX, version: 1, authorize: true, handler: getUser },
+      { name: 'getUserPasskeyOptionsX', pattern: Patterns.userPasskeyOptionsX, version: 1, authorize: true, handler: getPasskeyOptions },
+      { name: 'getUserSessionX', pattern: Patterns.userSessionX, version: 1, authorize: true, checkCsrf: false, handler: getSession },
       { name: 'getSenderLink', pattern: Patterns.senderLink, version: 1, authorize: true, handler: getSenderLink },
    ],
    POST: [
       { name: 'postAuthVerify', pattern: Patterns.authVerify, version: 1, authorize: false, handler: postAuthVerify },
+      { name: 'postPasskeyVerify', pattern: Patterns.passkeyVerify, version: 1, authorize: true, handler: postPasskeyVerify },
       { name: 'postRegOptions', pattern: Patterns.regOptions, version: 1, authorize: false, handler: postRegOptions },
       { name: 'postRegVerify', pattern: Patterns.regVerify, version: 1, authorize: false, handler: postRegVerify },
-      { name: 'postRecover', pattern: Patterns.userRecover, version: 1, authorize: false, handler: postRecover },
-      { name: 'postRecover2', pattern: Patterns.userRecover2, version: 1, authorize: false, handler: postRecover2 },
-      { name: 'postUserPasskeyVerify', pattern: Patterns.userPasskeyVerify, version: 1, authorize: false, handler: postUserPasskeyVerify },
+      { name: 'postRecover', pattern: Patterns.recover, version: 1, authorize: false, handler: postRecover },
+      { name: 'postRecover2', pattern: Patterns.recover2, version: 1, authorize: false, handler: postRecover2 },
+
+      // old for backward compatibility
+      { name: 'postUserPasskeyVerifyX', pattern: Patterns.userPasskeyVerifyX, version: 1, authorize: true, handler: postPasskeyVerify },
+      { name: 'postAuthVerifyX', pattern: Patterns.authVerifyX, version: 1, authorize: false, handler: postAuthVerify },
+      { name: 'postRegVerifyX', pattern: Patterns.regVerifyX, version: 1, authorize: false, handler: postRegVerify },
 
       // Sender links
       { name: 'postSenderLinks', pattern: Patterns.senderLinks, version: 1, authorize: true, handler: postSenderLinks },
@@ -1983,13 +1962,21 @@ const METHODMAP: MethodMap = {
    PUT: [
    ],
    PATCH: [
-      { name: 'patchPasskey', pattern: Patterns.userPasskey, version: 1, authorize: true, handler: patchPasskey },
+      { name: 'patchPasskey', pattern: Patterns.passkey, version: 1, authorize: true, handler: patchPasskey },
       { name: 'patchUser', pattern: Patterns.user, version: 1, authorize: true, handler: patchUser },
+
+      // old for backward compatibility
+      { name: 'patchPasskeyX', pattern: Patterns.userPasskeyX, version: 1, authorize: true, handler: patchPasskey },
+      { name: 'patchUserInfoX', pattern: Patterns.userInfoX, version: 1, authorize: true, handler: patchUser },
       { name: 'patchSenderLink', pattern: Patterns.senderLink, version: 1, authorize: true, handler: patchSenderLink },
    ],
    DELETE: [
-      { name: 'deletePasskey', pattern: Patterns.userPasskey, version: 1, authorize: true, handler: deletePasskey },
-      { name: 'deleteUserSession', pattern: Patterns.userSession, version: 1, authorize: true, handler: deleteUserSession },
+      { name: 'deletePasskey', pattern: Patterns.passkey, version: 1, authorize: true, handler: deletePasskey },
+      { name: 'deleteSession', pattern: Patterns.session, version: 1, authorize: true, handler: deleteSession },
+
+      // old for backward compatibility
+      { name: 'deletePasskeyX', pattern: Patterns.userPasskeyX, version: 1, authorize: true, handler: deletePasskey },
+      { name: 'deleteUserSessionX', pattern: Patterns.userSessionX, version: 1, authorize: true, handler: deleteSession },
       { name: 'deleteSenderLink', pattern: Patterns.senderLink, version: 1, authorize: true, handler: deleteSenderLink },
    ],
 };

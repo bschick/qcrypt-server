@@ -5,8 +5,8 @@
   "description": "Backend authentication servers for quick crypt",
   "main": "index.ts",
   "scripts": {
-    "test": "jasmine",
-    "test:prod": "QC_ENV=prod jasmine",
+    "test": "NODE_OPTIONS='--loader ts-node/esm --experimental-specifier-resolution=node --no-warnings' jasmine --config=spec/support/jasmine.json",
+    "test:prod": "QC_ENV=prod NODE_OPTIONS='--loader ts-node/esm --experimental-specifier-resolution=node --no-warnings' jasmine --config=spec/support/jasmine.json",
     "build": "esbuild --bundle          --platform=node --target=es2022 --outdir=build src/index.ts && rm -f ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js ./assets/aaguid/combined.json",
     "buildmin": "esbuild --bundle --minify --platform=node --target=es2022 --outdir=build src/index.ts && rm -f ./build/index.zip &&  zip -j ./build/index.zip ./build/index.js ./assets/aaguid/combined.json"
   },

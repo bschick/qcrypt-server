@@ -20,7 +20,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE. */
 
-import { Entity } from "electrodb";
+import { Entity, type EntityItem, type EntityRecord } from "electrodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 
@@ -412,3 +412,11 @@ export const AAGUIDs = new Entity(
       client: client
    }
 );
+
+
+export type UnverifiedUserItem = EntityItem<typeof Users>;
+export type AuthItem = EntityItem<typeof Authenticators>;
+export type VerifiedUserItem = EntityRecord<typeof Users> & {
+   lastCredentialId?: string;
+   recoveryIdEnc?: string;
+};
