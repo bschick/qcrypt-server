@@ -132,13 +132,19 @@ export const Patterns = {
 
    // Sender Link patterns
    senderLinks: new URLPattern({
-      pathname: `/v:ver/users/:userid/senderlinks`
+      pathname: `/v:ver/senderlinks`
    }),
    senderLinkVerify: new URLPattern({
-      pathname: `/v:ver/users/:userid/senderlinks/:linkid/verify`
+      pathname: `/v:ver/senderlinks/:linkid/verify`
+   }),
+   senderLinkBind: new URLPattern({
+      pathname: `/v:ver/senderlinks/:linkid/bind`
    }),
    senderLink: new URLPattern({
-      pathname: `/v:ver/users/:userid/senderlinks/:linkid`
+      pathname: `/v:ver/senderlinks/:linkid`
+   }),
+   senderLinksDelete: new URLPattern({
+      pathname: `/v:ver/senderlinks/delete`
    }),
 
    // Internal only URLS (not allowed through Cloudfront)

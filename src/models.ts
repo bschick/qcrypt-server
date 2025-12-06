@@ -413,9 +413,9 @@ export const AAGUIDs = new Entity(
    }
 );
 
-
 export type UnverifiedUserItem = EntityItem<typeof Users>;
 export type AuthItem = EntityItem<typeof Authenticators>;
+export type SenderLinkItem = EntityItem<typeof SenderLinks>;
 export type VerifiedUserItem = EntityRecord<typeof Users> & {
    lastCredentialId?: string;
    recoveryIdEnc?: string;

@@ -61,6 +61,7 @@ import {
    AuthEvents,
    AAGUIDs,
    SenderLinks,
+   type SenderLinkItem,
    type VerifiedUserItem,
    type UnverifiedUserItem,
    type AuthItem,
@@ -119,6 +120,11 @@ type SenderLink = {
    description: string;
    senderId: string;
    linkId: string;
+};
+
+type SenderLinkBind = SenderLink & {
+   senderCert: string;
+   eep: string;
 };
 
 type LoginUserInfo = UserInfo & {
@@ -182,7 +188,8 @@ function checkVerified(unverifiedUser: UnverifiedUserItem, userId: string): Veri
 }
 
 async function createCert(
-   publicKey: Uint8Array
+   publicKey: Uint8Array,
+   verfifiedUser?: VerifiedUserItem,
 ): Promise<string> {
    if (!signingKey) {
       signingKey = await setupSigningKey();
@@ -193,9 +200,13 @@ async function createCert(
    const packer = new CertPacker();
    packer.ver = cc.CERT_VERSION;
    packer.key = publicKey;
+   if(verfifiedUser) {
+      packer.uid = verfifiedUser.userId;
+      packer.uname = verfifiedUser.userName;
+   }
 
    //   console.log("signing key: ", base64UrlEncode(signingKey));
-   const signed = sodium.crypto_sign(packer.detach(), signingKey, "base64");
+   const signed = sodium.crypto_sign(packer.trim(), signingKey, "base64");
    //   console.log("signed: " + signed);
    //   const opened = sodium.crypto_sign_open(base64UrlDecode(signed)!, base64UrlDecode(serverPublicKey)!, "base64");
    //   console.log("opened: " + opened);
@@ -745,7 +756,6 @@ async function postSenderLinks(
    if (description.length < 6 || description.length > 55) {
       throw new ParamError('description must more than 5 and less than 56 character');
    }
-
    if (!validB64(body.publicKey)) {
       throw new ParamError('invalid publicKey');
    }
@@ -775,11 +785,12 @@ async function postSenderLinks(
       linkId = base64UrlEncode(linkIdBytes)!;
       // console.log(`linkId: ${linkId}`);
 
-      const links = await SenderLinks.query.byLinkId({
-         linkId: linkId
+      const links = await SenderLinks.get({
+         linkId: linkId,
+         senderId
       }).go();
 
-      if (!links || links.data.length == 0) {
+      if (!links || !links.data) {
          break;
       } else {
          linkId = undefined;
@@ -792,7 +803,7 @@ async function postSenderLinks(
 
    const { publicKey, privateKey } = sodium.crypto_kx_keypair();
    const transportCert = await createCert(publicKey);
-   const receiverCert = await createCert(base64UrlDecode(body.publicKey)!);
+   const receiverCert = await createCert(base64UrlDecode(body.publicKey)!, verifiedUser);
 
    try {
       const link = await SenderLinks.create({
@@ -802,8 +813,8 @@ async function postSenderLinks(
          description,
          receiverCert,
          transportCert,
-         multiUse,
          transportPrivateKey: base64UrlEncode(privateKey)!,
+         multiUse
       }).go();
 
       if (!link || !link.data) {
@@ -814,6 +825,7 @@ async function postSenderLinks(
       return { content: response };
    } catch (err) {
       if (err instanceof ElectroError) {
+         console.error(err);
          throw new ParamError('could not create sender link');
       }
       throw err;
@@ -851,21 +863,103 @@ async function postSenderLinkVerify(
          eep: body.eep
       }).where(
          (attr, op) => op.eq(attr.receiverId, verifiedUser.userId)
-      ).go();
+      ).go({ response: 'all_new' });
 
       if (!patched || !patched.data) {
          throw new ParamError('could not verify sender link');
       }
 
-      const response = makeSenderLinkResponse(patched.data as SenderLinkItem);
+      const response = makeSenderLinkResponse(patched.data);
       return { content: response };
    } catch (err) {
       if (err instanceof ElectroError) {
+         console.error(err);
          throw new ParamError('sender link verify failed');
       }
       throw err;
    }
+}
 
+async function postSenderLinkBind(
+   httpDetails: HttpDetails,
+   verifiedUser?: VerifiedUserItem
+): Promise<Response> {
+   const {
+      body,
+      resources
+   } = httpDetails;
+
+   if (!verifiedUser) {
+      throw new AuthError();
+   }
+   if (!validB64(body.publicKey)) {
+      throw new ParamError('invalid publicKey');
+   }
+   if (!validB64(resources.linkid)) {
+      throw new ParamError('invalid linkid');
+   }
+
+   try {
+      // See if there is a link bound to calling user
+      let link = await SenderLinks.get({
+         linkId: resources.linkid,
+         senderId: verifiedUser.userId
+      }).go();
+
+      if (!link || !link.data) {
+         // not found, see if there is an unbound link
+         link = await SenderLinks.get({
+            linkId: resources.linkid,
+            senderId: ""
+         }).go();
+      } else {
+         if (link.data.receiverId === verifiedUser.userId) {
+            throw new ParamError('cannot self bind');
+         }
+      }
+
+      if (!link || !link.data || !link.data.eep) {
+         throw new ParamError('invalid link');
+      }
+
+      if (link.data.senderId === "") {
+         // bind to calling user
+         const newLink = await SenderLinks.create({
+            linkId: link.data.linkId,
+            senderId: verifiedUser.userId,
+            receiverId: link.data.receiverId,
+            description: link.data.description,
+            receiverCert: link.data.receiverCert,
+            transportCert: link.data.transportCert,
+            transportPrivateKey: link.data.transportPrivateKey,
+            multiUse: false,
+            eep: link.data.eep
+         }).go();
+
+         if (!newLink || !newLink.data) {
+            throw new ParamError('could not create sender link');
+         }
+
+         if (!link.data.multiUse) {
+            await SenderLinks.delete({
+               linkId: link.data.linkId,
+               senderId: ""
+            }).go();
+         }
+
+         link = newLink;
+      }
+
+      const senderCert = await createCert(base64UrlDecode(body.publicKey)!, verifiedUser);
+      const response = makeSenderLinkBindResponse(link.data!, senderCert);
+      return { content: response };
+   } catch (err) {
+      if (err instanceof ElectroError) {
+         console.error(err);
+         throw new ParamError('sender link bind failed');
+      }
+      throw err;
+   }
 }
 
 async function patchSenderLink(
@@ -907,6 +1001,7 @@ async function patchSenderLink(
       }
    } catch (err) {
       if (err instanceof ElectroError) {
+         console.error(err);
          throw new ParamError('sender link update failed');
       }
       throw err;
@@ -915,103 +1010,83 @@ async function patchSenderLink(
    return { content: { linkId: resources.linkid } };
 }
 
-async function deleteSenderLink(
+async function postSenderLinksDelete(
    httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
    const {
-      resources
+      body
    } = httpDetails;
 
    if (!verifiedUser) {
       throw new AuthError();
    }
-   if (!validB64(resources.linkid)) {
-      throw new ParamError('invalid linkid');
+   if (!Array.isArray(body)) {
+      throw new ParamError('body must be an array');
+   }
+   body.forEach((link: Record<string, string>) => {
+      if (!validB64(link.linkId)) {
+         throw new ParamError('invalid linkid');
+      }
+      if (link.senderId !== "" && !validB64(link.senderId)) {
+         throw new ParamError('invalid senderId');
+      }
+   });
+
+   let failed = 0;
+   let deleted;
+   for (const link of body) {
+      deleted = undefined;
+      console.log(`deleting link ${link.linkId}, ${link.senderId} for user ${verifiedUser.userId}`);
+      try {
+         deleted = await SenderLinks.delete({
+            linkId: link.linkId,
+            senderId: link.senderId,
+         }).where(
+            (attr, op) => op.eq(attr.receiverId, verifiedUser.userId)
+         ).go();
+      } catch (err) {
+         console.error(err);
+      } finally {
+         if (!deleted || !deleted.data) {
+            failed++;
+         }
+      }
    }
 
-   try {
-      const deleted = await SenderLinks.delete({
-         receiverId: verifiedUser.userId,
-         linkId: resources.linkid
-      }).go();
-
-      if (!deleted || !deleted.data) {
-         throw new ParamError('could not delete sender link');
-      }
-   } catch (err) {
-      if (err instanceof ElectroError) {
-         throw new ParamError('sender link delete failed');
-      }
-      throw err;
+   if (failed > 0) {
+      throw new ParamError('could not delete some sender links');
    }
-
-   return { content: { success: true } };
+   return getSenderLinks(httpDetails, verifiedUser);
 }
 
-async function getSenderLink(
+async function getSenderLinks(
    httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
 ): Promise<Response> {
-   const {
-      resources
-   } = httpDetails;
 
    if (!verifiedUser) {
       throw new AuthError();
    }
-   if (!validB64(resources.linkid)) {
-      throw new ParamError('invalid linkid');
-   }
 
    try {
-      // First check if there is a link for this user
-      let link = await SenderLinks.get({
-         linkId: resources.linkid,
-         senderId: verifiedUser.userId
+      const links = await SenderLinks.query.byReceiverId({
+         receiverId: verifiedUser.userId
       }).go();
 
-      if (!link || !link.data) {
-         // Next check if there is an unbound link
-         link = await SenderLinks.get({
-            linkId: resources.linkid,
-            senderId: ""
-         }).go();
+      let response: SenderLink[] = [];
+      if (links && links.data.length > 0) {
+         response = links.data.map((link: SenderLinkItem) => (makeSenderLinkResponse(link)));
       }
 
-      if (!link || !link.data) {
-         throw new ParamError('could not get sender link');
-      }
-
-      // If link was not bound, bind it now.
-      if (!link.data.senderId) {
-         // Multi-use links cloned each time a new sender makes a request
-         if (link.data.multiUse) {
-            link = await SenderLinks.clone({
-               linkId: resources.linkid,
-               senderId: verifiedUser.userId
-            }).go();
-         }
-         throw new ParamError('could not get sender link');
-      }
-
-      return {
-         content: {
-            linkId: link.linkId,
-            receiverCert: link.receiverCert,
-            transportCert: link.transportCert,
-            senderId: link.senderId,
-            eep: link.eep
-         }
-      };
+      return { content: response };
    } catch (err) {
       if (err instanceof ElectroError) {
-         throw new ParamError('sender link get failed');
+         console.error(err);
+         throw new ParamError('sender links get failed');
       }
       throw err;
    }
-
-   return { content: { success: true } };
 }
 
 async function getAuthOptions(
@@ -1289,6 +1364,18 @@ function makeSenderLinkResponse(
    };
 }
 
+function makeSenderLinkBindResponse(
+   senderLink: SenderLinkItem,
+   senderCert: string
+): SenderLinkBind {
+   return {
+      ...makeSenderLinkResponse(senderLink),
+      eep: senderLink.eep!,
+      senderCert: senderCert,
+   };
+}
+
+
 async function patchPasskey(
    httpDetails: HttpDetails,
    verifiedUser?: VerifiedUserItem
@@ -1327,6 +1414,7 @@ async function patchPasskey(
       }
    } catch (err) {
       if (err instanceof ElectroError) {
+         console.error(err);
          throw new ParamError('description update failed');
       }
       throw err;
@@ -1374,6 +1462,7 @@ async function patchUser(
       }
    } catch (err) {
       if (err instanceof ElectroError) {
+         console.error(err);
          throw new ParamError('username update failed');
       }
       throw err;
@@ -1935,7 +2024,7 @@ const METHODMAP: MethodMap = {
       { name: 'getUserInfoX', pattern: Patterns.userInfoX, version: 1, authorize: true, handler: getUser },
       { name: 'getUserPasskeyOptionsX', pattern: Patterns.userPasskeyOptionsX, version: 1, authorize: true, handler: getPasskeyOptions },
       { name: 'getUserSessionX', pattern: Patterns.userSessionX, version: 1, authorize: true, checkCsrf: false, handler: getSession },
-      { name: 'getSenderLink', pattern: Patterns.senderLink, version: 1, authorize: true, handler: getSenderLink },
+      { name: 'getSenderLinks', pattern: Patterns.senderLinks, version: 1, authorize: true, handler: getSenderLinks },
    ],
    POST: [
       { name: 'postAuthVerify', pattern: Patterns.authVerify, version: 1, authorize: false, handler: postAuthVerify },
@@ -1953,6 +2042,8 @@ const METHODMAP: MethodMap = {
       // Sender links
       { name: 'postSenderLinks', pattern: Patterns.senderLinks, version: 1, authorize: true, handler: postSenderLinks },
       { name: 'postSenderLinkVerify', pattern: Patterns.senderLinkVerify, version: 1, authorize: true, handler: postSenderLinkVerify },
+      { name: 'postSenderLinkBind', pattern: Patterns.senderLinkBind, version: 1, authorize: true, handler: postSenderLinkBind },
+      { name: 'postSenderLinksDelete', pattern: Patterns.senderLinksDelete, version: 1, authorize: true, handler: postSenderLinksDelete },
 
       // Internal only endpoints that are not exposed in cloudfront and require special auth
       { name: 'postMunge', pattern: Patterns.munge, version: INTERNAL_VERSION, authorize: false, handler: postMunge },
@@ -1977,7 +2068,6 @@ const METHODMAP: MethodMap = {
       // old for backward compatibility
       { name: 'deletePasskeyX', pattern: Patterns.userPasskeyX, version: 1, authorize: true, handler: deletePasskey },
       { name: 'deleteUserSessionX', pattern: Patterns.userSessionX, version: 1, authorize: true, handler: deleteSession },
-      { name: 'deleteSenderLink', pattern: Patterns.senderLink, version: 1, authorize: true, handler: deleteSenderLink },
    ],
 };
 

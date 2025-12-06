@@ -153,6 +153,20 @@ export class CertExtractor<T extends ArrayBufferLike> {
    get key(): Uint8Array<T> {
       return this.extract('key', cc.CERT_KEY_BYTES);
    }
+
+   get uid(): string {
+      return base64UrlEncode(this.extract('uid', cc.USERID_BYTES))!;
+   }
+
+   get uname(): string {
+      const nameLen = bytesToNum(this.extract('nlen', cc.UNAME_LEN_BYTES));
+      const nameBytes = this.extract('uname', nameLen);
+      const name = new TextDecoder().decode(nameBytes);
+      if (name.length < cc.UNAME_MIN_LEN || name.length > cc.UNAME_MAX_LEN) {
+         throw new Error('user name must be 6 to 31 characters');
+      }
+      return name;
+   }
 }
 
 
@@ -161,7 +175,7 @@ export class CertPacker {
    private _offset: number;
 
    constructor(offset: number = 0) {
-      this._dest = new Uint8Array(cc.CERT_BYTES);
+      this._dest = new Uint8Array(cc.CERT_MAX_BYTES);
       this._offset = offset;
    }
 
@@ -227,5 +241,22 @@ export class CertPacker {
          throw new Error('Invalid version of: ' + version);
       }
       this.pack('ver', numToBytes(version, cc.CERT_VERSION_BYTES));
+   }
+
+   set uid(userId: string) {
+      const userIdBytes = base64UrlDecode(userId)!;
+      if (userIdBytes.byteLength != cc.USERID_BYTES) {
+         throw new Error('Invalid user id length: ' + userIdBytes.byteLength);
+      }
+      this.pack('uid', userIdBytes);
+   }
+
+   set uname(userName: string) {
+      if (userName.length < cc.UNAME_MIN_LEN || userName.length > cc.UNAME_MAX_LEN) {
+         throw new Error('user name must be 6 to 31 characters');
+      }
+      const nameBytes = new TextEncoder().encode(userName);
+      this.pack('nlen', numToBytes(nameBytes.length, cc.UNAME_LEN_BYTES));
+      this.pack('uname', nameBytes);
    }
 }

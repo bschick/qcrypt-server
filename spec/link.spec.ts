@@ -37,7 +37,9 @@ fdescribe("Testing Sender Link creation and use", () => {
    // Shared state
    let currentUserId: string;
    const receiverUserId = "apg-keGhAyboNA-tGoe4OQ";
+   const receiverUserName = "SenderLinkTest";
    const senderUserId = "zQlO8qxeLpeYZBXxZIRtzg";
+   const senderUserName = "SenderLinkTest2";
    //   const passkeyId = "gVU7LLGhDQsRzNabYVZbwBGjxWlTc4BmZ-LBy5lqM2g";
    const receiverMasterKey = "4DcnSvUKg4rw4YW8V5-3X7bujlWyItIfOLuX0EiPGIM";
    let serverPublicKeys: Uint8Array[] = [];
@@ -57,7 +59,7 @@ fdescribe("Testing Sender Link creation and use", () => {
 
    let sessionCookie: string = "";
    let csrfToken: string = "";
-   const emulator = getWebAuthnEmulator();
+   const emulator = getWebAuthnEmulator(true);
 
    const loginUser = async (userId: string) => {
       const optsRes = await getJson(
@@ -74,7 +76,7 @@ fdescribe("Testing Sender Link creation and use", () => {
       });
 
       const verifyRes = await postJson(
-         `/v1/users/${userId}/auth/verify?usercred=true`,
+         `/v1/auth/verify?usercred=true`,
          { ...assertion, userId, challenge: optsRes.data.challenge },
          {},
          sessionCookie,
@@ -102,7 +104,7 @@ fdescribe("Testing Sender Link creation and use", () => {
 
    const ensureLogin = async () => {
       const res = await getJson(
-         `/v1/users/${currentUserId}`,
+         `/v1/user`,
          { "x-csrf-token": csrfToken },
          sessionCookie
       );
@@ -119,14 +121,14 @@ fdescribe("Testing Sender Link creation and use", () => {
       // In testing this produced the same public and private keys each time because we're using the
       // same copied master key repeately (created from the same salt and pwd). Make sure to add other
       // tests with randomly generated master key
-      const { publicKey, privateKey } = sodium.crypto_kx_seed_keypair(base64UrlDecode(receiverMasterKey)!, 'base64');
+      const receiverKeys = sodium.crypto_kx_seed_keypair(base64UrlDecode(receiverMasterKey)!, 'base64');
 
-      // console.log(`my publicKey: ${publicKey}`);
-      // console.log(`my privateKey: ${privateKey}`);
+      // console.log(`my publicKey: ${receiverKeys.publicKey}`);
+      // console.log(`my privateKey: ${receiverKeys.privateKey}`);
 
-      const info = await postJson(
-         `/v1/users/${receiverUserId}/senderlinks`,
-         { publicKey, description: "testing123", multiUse: false },
+      let info = await postJson(
+         `/v1/senderlinks`,
+         { publicKey: receiverKeys.publicKey, description: "testing123", multiUse: false },
          { "x-csrf-token": csrfToken },
          sessionCookie
       );
@@ -135,21 +137,24 @@ fdescribe("Testing Sender Link creation and use", () => {
       expect(info.data.transportCert).toBeTruthy();
       expect(info.data.receiverCert).toBeTruthy();
       expect(info.data.linkId).toBeTruthy();
+      expect(info.data.description).toEqual("testing123");
 
       linkId = info.data.linkId;
 
-      const transportCertData = sodium.crypto_sign_open(base64UrlDecode(info.data.transportCert)!, serverPublicKeys[0]);
-      const receiverCertData = sodium.crypto_sign_open(base64UrlDecode(info.data.receiverCert)!, serverPublicKeys[0]);
+      let transportCertData = sodium.crypto_sign_open(base64UrlDecode(info.data.transportCert)!, serverPublicKeys[0]);
+      let receiverCertData = sodium.crypto_sign_open(base64UrlDecode(info.data.receiverCert)!, serverPublicKeys[0]);
 
       expect(transportCertData).toBeTruthy();
-      const extractor1 = new CertExtractor(transportCertData);
+      let extractor1 = new CertExtractor(transportCertData);
       expect(extractor1.ver).toEqual(cc.CERT_VERSION);
       expect(base64UrlEncode(extractor1.key)).toBeTruthy();
 
       expect(receiverCertData).toBeTruthy();
-      const extractor2 = new CertExtractor(receiverCertData);
+      let extractor2 = new CertExtractor(receiverCertData);
       expect(extractor2.ver).toEqual(cc.CERT_VERSION);
-      expect(base64UrlEncode(extractor2.key)).toEqual(publicKey);
+      expect(base64UrlEncode(extractor2.key)).toEqual(receiverKeys.publicKey);
+      expect(extractor2.uid).toEqual(receiverUserId);
+      expect(extractor2.uname).toEqual(receiverUserName);
 
       // const eepBuf = Buffer.concat([
       //    Buffer.from(numToBytes(cc.CERT_VERSION, cc.CERT_VERSION_BYTES)),
@@ -161,18 +166,18 @@ fdescribe("Testing Sender Link creation and use", () => {
       // previously generated EEP
       const eep = "Lrywg0A5gUXloi-ouwBxAdOe4JapdPmp4MJMTFEBAN8GAB4BAAECANSXDXLDWuvN7wPsHa0OIhZXMG2v_mYJJpQlIttXmdCIE4tfBbPHQGOAZiMAABqKt9ekJNxCwEj_HeFJfzFW_CYY-7-7_FhQ65GVACLjEc7Qv1fsctcDmIc7cMm1tZtwBHmS5kJBs1SxzJVGXoqIChgka609HuT_mGT5_Hgf1AdQNJJvWKKRRCMoTUPoKd2hhrrahZAlRdLWcCwxHauHeazyKcVo8yq6tztoplrfK0KkQ3IZmh6X1KZzwAITJusZiYp-UcoEITJnoqoYWaL14hduGGwjqQ7uZ-kMNx6Pu1McS9jtTp7aOkzYiTySNIZVllJPRGgPvpGJ45jKJiKpsr8jmzKB9WPlsKwvPRlTw1wmGwfxVDGWclfXiUg";
 
-      const patched = await patchJson(
-         `/v1/users/${receiverUserId}/senderlinks/${linkId}`,
+      const verified = await postJson(
+         `/v1/senderlinks/${linkId}/verify`,
          { eep },
          { "x-csrf-token": csrfToken },
          sessionCookie
       );
 
-      expect(patched.status).toBe(200);
-      expect(patched.data.linkId).toEqual(linkId);
+      expect(verified.status).toBe(200);
+      expect(verified.data.linkId).toEqual(linkId);
 
       const endSess = await deleteJson(
-         `/v1/users/${receiverUserId}/session`,
+         `/v1/session`,
          { "x-csrf-token": csrfToken },
          sessionCookie
       );
@@ -183,14 +188,44 @@ fdescribe("Testing Sender Link creation and use", () => {
       await loginUser(senderUserId);
       ensureLogin();
 
-      const linkRes = await getJson(
-         `/v1/users/${senderUserId}/senderlinks/${linkId}`,
+      const senderKeys = sodium.crypto_kx_keypair('base64');
+
+      info = await postJson(
+         `/v1/senderlinks/${linkId}/bind`,
+         { publicKey: senderKeys.publicKey },
          { "x-csrf-token": csrfToken },
          sessionCookie
       );
-      expect(linkRes.status).toBe(200);
-      expect(linkRes.data.linkId).toEqual(linkId);
-      expect(linkRes.data.description).toEqual("testing123");
+      expect(info.status).toBe(200);
+      expect(info.data.linkId).toEqual(linkId);
+      expect(info.data.description).toEqual("testing123");
+
+      expect(info.data.transportCert).toBeTruthy();
+      expect(info.data.receiverCert).toBeTruthy();
+
+      transportCertData = sodium.crypto_sign_open(base64UrlDecode(info.data.transportCert)!, serverPublicKeys[0]);
+      receiverCertData = sodium.crypto_sign_open(base64UrlDecode(info.data.receiverCert)!, serverPublicKeys[0]);
+      let senderCertData = sodium.crypto_sign_open(base64UrlDecode(info.data.senderCert)!, serverPublicKeys[0]);
+
+      expect(transportCertData).toBeTruthy();
+      extractor1 = new CertExtractor(transportCertData);
+      expect(extractor1.ver).toEqual(cc.CERT_VERSION);
+      expect(base64UrlEncode(extractor1.key)).toBeTruthy();
+
+      expect(receiverCertData).toBeTruthy();
+      extractor2 = new CertExtractor(receiverCertData);
+      expect(extractor2.ver).toEqual(cc.CERT_VERSION);
+      expect(base64UrlEncode(extractor2.key)).toEqual(receiverKeys.publicKey);
+      expect(extractor2.uid).toEqual(receiverUserId);
+      expect(extractor2.uname).toEqual(receiverUserName);
+
+      expect(senderCertData).toBeTruthy();
+      let extractor3 = new CertExtractor(senderCertData);
+      expect(extractor3.ver).toEqual(cc.CERT_VERSION);
+      expect(base64UrlEncode(extractor3.key)).toEqual(senderKeys.publicKey);
+      expect(extractor3.uid).toEqual(senderUserId);
+      expect(extractor3.uname).toEqual(senderUserName);
+
    });
 
 
@@ -202,13 +237,14 @@ fdescribe("Testing Sender Link creation and use", () => {
       await loginUser(receiverUserId);
       ensureLogin();
 
-      const res = await deleteJson(
-         `/v1/users/${receiverUserId}/senderlinks/${linkId}`,
+      // try both bound and unbound in case of previous test failure
+      await postJson(
+         `/v1/senderlinks/delete`,
+         [{ linkId, senderId: "" }, { linkId, senderId: senderUserId }],
          { "x-csrf-token": csrfToken },
          sessionCookie,
       );
 
-      expect(res.status).toBe(200);
    });
 
    // it("test signature", async () => {
