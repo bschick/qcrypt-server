@@ -71,13 +71,9 @@ const hostname = '{*.}?quickcrypt.org'
 // a failed match.
 //const b64Chars = '[A-Za-z0-9+/=_-]';
 
-// The X suffix is for temporary backward compatibility, remove after client updates
 export const Patterns = {
    regOptions: new URLPattern({
       pathname: '/v:ver/reg/options',
-   }),
-   regVerifyX: new URLPattern({
-      pathname: '/v:ver/users/:userid/reg/verify',
    }),
    regVerify: new URLPattern({
       pathname: '/v:ver/reg/verify',
@@ -85,14 +81,8 @@ export const Patterns = {
    authOptions: new URLPattern({
       pathname: '/v:ver/auth/options',
    }),
-   authVerifyX: new URLPattern({
-      pathname: '/v:ver/users/:userid/auth/verify',
-   }),
    authVerify: new URLPattern({
       pathname: '/v:ver/auth/verify',
-   }),
-   userInfoX: new URLPattern({
-      pathname: `/v:ver/users/:userid`,
    }),
    user: new URLPattern({
       pathname: `/v:ver/user`,
@@ -103,28 +93,16 @@ export const Patterns = {
    recover2: new URLPattern({
       pathname: `/v:ver/users/:userid/recover2/:recoveryid`,
    }),
-   userSessionX: new URLPattern({
-      pathname: `/v:ver/users/:userid/session`,
-   }),
    session: new URLPattern({
       pathname: `/v:ver/session`,
    }),
    // Must search options and verify before passkey/:authid
-   userPasskeyOptionsX: new URLPattern({
-      pathname: `/v:ver/users/:userid/passkeys/options`,
-   }),
    passkeyOptions: new URLPattern({
       pathname: `/v:ver/passkeys/options`,
    }),
    // Must seach options and verify before passkey/:authid
-   userPasskeyVerifyX: new URLPattern({
-      pathname: `/v:ver/users/:userid/passkeys/verify`,
-   }),
    passkeyVerify: new URLPattern({
       pathname: `/v:ver/passkeys/verify`,
-   }),
-   userPasskeyX: new URLPattern({
-      pathname: `/v:ver/users/:userid/passkeys/:credid`
    }),
    passkey: new URLPattern({
       pathname: `/v:ver/passkeys/:credid`

@@ -1572,8 +1572,6 @@ export async function handler(event: any, context: any) {
    }
 }
 
-// The X suffix is for temporary backward compatibility, remove after client updates
-
 const METHODMAP: MethodMap = {
    GET: [
       { name: 'getAuthOptions', pattern: Patterns.authOptions, version: 1, authorize: false, handler: getAuthOptions },
@@ -1582,11 +1580,6 @@ const METHODMAP: MethodMap = {
       // Special case of an authenticated method that does not require csrf. Needed so GET session works in a fresh
       // tab/window, and should be safe since csrf isn't technically needed for GET calls due to Same-Origin
       { name: 'getSession', pattern: Patterns.session, version: 1, authorize: true, checkCsrf: false, handler: getSession },
-
-      // old for backward compatibility
-      { name: 'getUserInfoX', pattern: Patterns.userInfoX, version: 1, authorize: true, handler: getUser },
-      { name: 'getUserPasskeyOptionsX', pattern: Patterns.userPasskeyOptionsX, version: 1, authorize: true, handler: getPasskeyOptions },
-      { name: 'getUserSessionX', pattern: Patterns.userSessionX, version: 1, authorize: true, checkCsrf: false, handler: getSession },
    ],
    POST: [
       { name: 'postAuthVerify', pattern: Patterns.authVerify, version: 1, authorize: false, handler: postAuthVerify },
@@ -1595,11 +1588,6 @@ const METHODMAP: MethodMap = {
       { name: 'postRegVerify', pattern: Patterns.regVerify, version: 1, authorize: false, handler: postRegVerify },
       { name: 'postRecover', pattern: Patterns.recover, version: 1, authorize: false, handler: postRecover },
       { name: 'postRecover2', pattern: Patterns.recover2, version: 1, authorize: false, handler: postRecover2 },
-
-      // old for backward compatibility
-      { name: 'postUserPasskeyVerifyX', pattern: Patterns.userPasskeyVerifyX, version: 1, authorize: true, handler: postPasskeyVerify },
-      { name: 'postAuthVerifyX', pattern: Patterns.authVerifyX, version: 1, authorize: false, handler: postAuthVerify },
-      { name: 'postRegVerifyX', pattern: Patterns.regVerifyX, version: 1, authorize: false, handler: postRegVerify },
 
       // Internal only endpoints that are not exposed in cloudfront and require special auth
       { name: 'postMunge', pattern: Patterns.munge, version: INTERNAL_VERSION, authorize: false, handler: postMunge },
@@ -1611,17 +1599,9 @@ const METHODMAP: MethodMap = {
    PATCH: [
       { name: 'patchPasskey', pattern: Patterns.passkey, version: 1, authorize: true, handler: patchPasskey },
       { name: 'patchUser', pattern: Patterns.user, version: 1, authorize: true, handler: patchUser },
-
-      // old for backward compatibility
-      { name: 'patchPasskeyX', pattern: Patterns.userPasskeyX, version: 1, authorize: true, handler: patchPasskey },
-      { name: 'patchUserInfoX', pattern: Patterns.userInfoX, version: 1, authorize: true, handler: patchUser },
-   ],
+  ],
    DELETE: [
       { name: 'deletePasskey', pattern: Patterns.passkey, version: 1, authorize: true, handler: deletePasskey },
       { name: 'deleteSession', pattern: Patterns.session, version: 1, authorize: true, handler: deleteSession },
-
-      // old for backward compatibility
-      { name: 'deletePasskeyX', pattern: Patterns.userPasskeyX, version: 1, authorize: true, handler: deletePasskey },
-      { name: 'deleteUserSessionX', pattern: Patterns.userSessionX, version: 1, authorize: true, handler: deleteSession },
    ],
 };
