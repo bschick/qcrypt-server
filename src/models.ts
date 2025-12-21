@@ -235,7 +235,7 @@ export const SenderLinks = new Entity(
             type: "string",
             required: true
          },
-         multiUse: {
+         multiUser: {
             type: "boolean",
             required: true
          },

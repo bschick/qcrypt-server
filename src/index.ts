@@ -759,12 +759,15 @@ async function postSenderLinks(
    if (!validB64(body.publicKey)) {
       throw new ParamError('invalid publicKey');
    }
-   const senderId = body.senderId ?? "";
-   if (senderId !== "" && !validB64(senderId)) {
+   if (!validB64(body.senderId)) {
       throw new ParamError('invalid senderId');
    }
 
-   const multiUse = body.multiUse ?? false;
+   const multiUser = body.multiUser ?? false;
+   if (multiUser && body.senderId !== cc.NOUSER_ID) {
+      throw new ParamError('cannot provider senderId with multiUser');
+   }
+
    let linkId: string | undefined;
 
    const rparams = {
@@ -787,7 +790,7 @@ async function postSenderLinks(
 
       const links = await SenderLinks.get({
          linkId: linkId,
-         senderId
+         senderId: body.senderId
       }).go();
 
       if (!links || !links.data) {
@@ -808,13 +811,13 @@ async function postSenderLinks(
    try {
       const link = await SenderLinks.create({
          linkId,
-         senderId,
+         senderId: body.senderId,
          receiverId: verifiedUser.userId,
          description,
          receiverCert,
          transportCert,
          transportPrivateKey: base64UrlEncode(privateKey)!,
-         multiUse
+         multiUser
       }).go();
 
       if (!link || !link.data) {
@@ -850,15 +853,14 @@ async function postSenderLinkVerify(
    if (!validB64(resources.linkid)) {
       throw new ParamError('invalid linkid');
    }
-   const senderId = body.senderId ?? "";
-   if (senderId !== "" && !validB64(senderId)) {
+   if (!validB64(body.senderId)) {
       throw new ParamError('invalid senderId');
    }
 
    try {
       const patched = await SenderLinks.patch({
          linkId: resources.linkid,
-         senderId: senderId,
+         senderId: body.senderId,
       }).set({
          eep: body.eep
       }).where(
@@ -910,7 +912,7 @@ async function postSenderLinkBind(
          // not found, see if there is an unbound link
          link = await SenderLinks.get({
             linkId: resources.linkid,
-            senderId: ""
+            senderId: cc.NOUSER_ID
          }).go();
       } else {
          if (link.data.receiverId === verifiedUser.userId) {
@@ -922,7 +924,7 @@ async function postSenderLinkBind(
          throw new ParamError('invalid link');
       }
 
-      if (link.data.senderId === "") {
+      if (link.data.senderId === cc.NOUSER_ID) {
          // bind to calling user
          const newLink = await SenderLinks.create({
             linkId: link.data.linkId,
@@ -932,7 +934,7 @@ async function postSenderLinkBind(
             receiverCert: link.data.receiverCert,
             transportCert: link.data.transportCert,
             transportPrivateKey: link.data.transportPrivateKey,
-            multiUse: false,
+            multiUser: false,
             eep: link.data.eep
          }).go();
 
@@ -940,10 +942,10 @@ async function postSenderLinkBind(
             throw new ParamError('could not create sender link');
          }
 
-         if (!link.data.multiUse) {
+         if (!link.data.multiUser) {
             await SenderLinks.delete({
                linkId: link.data.linkId,
-               senderId: ""
+               senderId: cc.NOUSER_ID
             }).go();
          }
 
@@ -981,15 +983,14 @@ async function patchSenderLink(
    if (description.length < 6 || description.length > 55) {
       throw new ParamError('description must more than 5 and less than 56 character');
    }
-   const senderId = body.senderId ?? "";
-   if (senderId !== "" && !validB64(senderId)) {
+   if (!validB64(body.senderId)) {
       throw new ParamError('invalid senderId');
    }
 
    try {
       const patched = await SenderLinks.patch({
          linkId: resources.linkid,
-         senderId: senderId,
+         senderId: body.senderId,
       }).set({
          description
       }).where(
@@ -1028,7 +1029,7 @@ async function postSenderLinksDelete(
       if (!validB64(link.linkId)) {
          throw new ParamError('invalid linkid');
       }
-      if (link.senderId !== "" && !validB64(link.senderId)) {
+      if (!validB64(link.senderId)) {
          throw new ParamError('invalid senderId');
       }
    });
@@ -2009,7 +2010,6 @@ export async function handler(event: any, context: any) {
    }
 }
 
-// The X suffix is for temporary backward compatibility, remove after client updates
 
 const METHODMAP: MethodMap = {
    GET: [
@@ -2020,10 +2020,6 @@ const METHODMAP: MethodMap = {
       // tab/window, and should be safe since csrf isn't technically needed for GET calls due to Same-Origin
       { name: 'getSession', pattern: Patterns.session, version: 1, authorize: true, checkCsrf: false, handler: getSession },
 
-      // old for backward compatibility
-      { name: 'getUserInfoX', pattern: Patterns.userInfoX, version: 1, authorize: true, handler: getUser },
-      { name: 'getUserPasskeyOptionsX', pattern: Patterns.userPasskeyOptionsX, version: 1, authorize: true, handler: getPasskeyOptions },
-      { name: 'getUserSessionX', pattern: Patterns.userSessionX, version: 1, authorize: true, checkCsrf: false, handler: getSession },
       { name: 'getSenderLinks', pattern: Patterns.senderLinks, version: 1, authorize: true, handler: getSenderLinks },
    ],
    POST: [
@@ -2033,11 +2029,6 @@ const METHODMAP: MethodMap = {
       { name: 'postRegVerify', pattern: Patterns.regVerify, version: 1, authorize: false, handler: postRegVerify },
       { name: 'postRecover', pattern: Patterns.recover, version: 1, authorize: false, handler: postRecover },
       { name: 'postRecover2', pattern: Patterns.recover2, version: 1, authorize: false, handler: postRecover2 },
-
-      // old for backward compatibility
-      { name: 'postUserPasskeyVerifyX', pattern: Patterns.userPasskeyVerifyX, version: 1, authorize: true, handler: postPasskeyVerify },
-      { name: 'postAuthVerifyX', pattern: Patterns.authVerifyX, version: 1, authorize: false, handler: postAuthVerify },
-      { name: 'postRegVerifyX', pattern: Patterns.regVerifyX, version: 1, authorize: false, handler: postRegVerify },
 
       // Sender links
       { name: 'postSenderLinks', pattern: Patterns.senderLinks, version: 1, authorize: true, handler: postSenderLinks },
@@ -2056,18 +2047,11 @@ const METHODMAP: MethodMap = {
       { name: 'patchPasskey', pattern: Patterns.passkey, version: 1, authorize: true, handler: patchPasskey },
       { name: 'patchUser', pattern: Patterns.user, version: 1, authorize: true, handler: patchUser },
 
-      // old for backward compatibility
-      { name: 'patchPasskeyX', pattern: Patterns.userPasskeyX, version: 1, authorize: true, handler: patchPasskey },
-      { name: 'patchUserInfoX', pattern: Patterns.userInfoX, version: 1, authorize: true, handler: patchUser },
       { name: 'patchSenderLink', pattern: Patterns.senderLink, version: 1, authorize: true, handler: patchSenderLink },
    ],
    DELETE: [
       { name: 'deletePasskey', pattern: Patterns.passkey, version: 1, authorize: true, handler: deletePasskey },
       { name: 'deleteSession', pattern: Patterns.session, version: 1, authorize: true, handler: deleteSession },
-
-      // old for backward compatibility
-      { name: 'deletePasskeyX', pattern: Patterns.userPasskeyX, version: 1, authorize: true, handler: deletePasskey },
-      { name: 'deleteUserSessionX', pattern: Patterns.userSessionX, version: 1, authorize: true, handler: deleteSession },
    ],
 };
 
