@@ -1,3 +1,4 @@
+import { describe, it, afterAll, expect } from 'vitest';
 import { base64UrlDecode, base64UrlEncode, CertExtractor, numToBytes } from "../src/utils.ts";
 import {
    postJson,
@@ -15,8 +16,6 @@ const SERVER_KEYS_URL = "https://gist.githubusercontent.com/quickcrypt-security/
 const SERVER_KEYS = process.env.QC_ENV === 'prod' ? "publicKeys1" : "publicKeys2";
 const EXPECTED_SERVER_KEY = process.env.QC_ENV === 'prod' ? "kVyD3JMfbqWSEe4XIzwxudJIyHMmID6lg69BQCGTcZk" : "0pbIB1B3k-oOTnMkq-41srsyiF18jms5HQKGiqS3f3c";
 
-jasmine.DEFAULT_TIMEOUT_INTERVAL = 60000;
-
 // Faster than .toEqual, resulting in few timeouts
 function isEqualArray(a: Uint8Array, b: Uint8Array): boolean {
    if (a.length != b.length) {
@@ -32,7 +31,7 @@ function isEqualArray(a: Uint8Array, b: Uint8Array): boolean {
 
 // ----- Test Suite -----
 
-fdescribe("Testing Sender Link creation and use", () => {
+describe.only("Testing Sender Link creation and use", () => {
 
    // Shared state
    let currentUserId: string;
@@ -152,7 +151,7 @@ fdescribe("Testing Sender Link creation and use", () => {
       expect(receiverCertData).toBeTruthy();
       let extractor2 = new CertExtractor(receiverCertData);
       expect(extractor2.ver).toEqual(cc.CERT_VERSION);
-      expect(isEqualArray(extractor2.key, receiverKeys.publicKey)).toBeTrue();
+      expect(isEqualArray(extractor2.key, receiverKeys.publicKey)).toBe(true);
       expect(extractor2.uid).toEqual(receiverUserId);
       expect(extractor2.uname).toEqual(receiverUserName);
 
@@ -217,14 +216,14 @@ fdescribe("Testing Sender Link creation and use", () => {
       extractor2 = new CertExtractor(receiverCertData);
       expect(extractor2.ver).toEqual(cc.CERT_VERSION);
       const receiverPublicKey = extractor2.key;
-      expect(isEqualArray(receiverPublicKey, receiverKeys.publicKey)).toBeTrue();
+      expect(isEqualArray(receiverPublicKey, receiverKeys.publicKey)).toBe(true);
       expect(extractor2.uid).toEqual(receiverUserId);
       expect(extractor2.uname).toEqual(receiverUserName);
 
       expect(senderCertData).toBeTruthy();
       let extractor3 = new CertExtractor(senderCertData);
       expect(extractor3.ver).toEqual(cc.CERT_VERSION);
-      expect(isEqualArray(extractor3.key, senderKeys.publicKey)).toBeTrue();
+      expect(isEqualArray(extractor3.key, senderKeys.publicKey)).toBe(true);
       expect(extractor3.uid).toEqual(senderUserId);
       expect(extractor3.uname).toEqual(senderUserName);
 
@@ -284,7 +283,7 @@ fdescribe("Testing Sender Link creation and use", () => {
 
    //    const receiverPubKey = sodium.crypto_sign_open(base64UrlDecode(testCert)!, base64UrlDecode(serverPublicKey)!, "base64");
    //    // const transportPubKey = sodium.crypto_sign_open(transportCert, publicKeys[0], 'base64');
-   //    //      expect(isEqualArray(receiverPubKey, testData)).toBeTrue();
+   //    //      expect(isEqualArray(receiverPubKey, testData)).toBe(true);
 
    //    // console.log(`receiverPubKey: ${receiverPubKey}`);
    //    //    console.log(`transportPubKey: ${transportPubKey}`);

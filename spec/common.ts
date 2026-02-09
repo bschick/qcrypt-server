@@ -60,5 +60,3 @@ export const getJson = (p: string, h: any, c: string) => request("GET", p, null,
 export const patchJson = (p: string, b: any, h: any, c: string) => request("PATCH", p, b, h, c);
 export const deleteJson = (p: string, h: any, c: string) => request("DELETE", p, null, h, c);
 
-jasmine.DEFAULT_TIMEOUT_INTERVAL = 60000;
-

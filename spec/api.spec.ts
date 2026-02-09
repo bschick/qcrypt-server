@@ -1,3 +1,4 @@
+import { describe, it, beforeAll, afterAll, expect } from 'vitest';
 import { WebAuthnEmulator } from "nid-webauthn-emulator";
 import {
    getWebAuthnEmulator,
