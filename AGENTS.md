@@ -42,7 +42,7 @@ This `qcrypt-server` can be built locally but currently is not setup to run loca
 
 ### a. One-time Setup of Dev/Test Environment
 
-You can either create a separate dev/test environment for `qcrypt-server`, as described below, or use an existing environment created for the `qcrypt` frontend. The requirements for a frontend environment are a superset of those for a backend setup. When re-using an existing setup, you can skip all the steps below except the code checkout and then run `npm install` within the directory.
+You can either create a separate dev/test environment for `qcrypt-server`, as described below, or use an existing environment created for the `qcrypt` frontend. The requirements for a frontend environment are a superset of those for a backend setup. When re-using an existing setup, you can skip all the steps below except the code checkout and then run `pnpm install` within the directory.
 
 - Create an up-to-date Ubuntu 24.04 (or similar) VM
 - (Optional) Setup an LXC container to simplify version testing by logging into the Ubuntu VM as a user with sudo permission and run the following:
@@ -71,13 +71,13 @@ git clone https://github.com/bschick/qcrypt-server.git && cd qcrypt-server
 To create a non-minimized build for debugging, run:
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 For production builds, use the following command to create a minimized version:
 
 ```bash
-npm run buildmin
+pnpm run buildmin
 ```
 
 The output will be placed in the `build/` directory.
