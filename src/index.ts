@@ -1284,14 +1284,6 @@ async function postRecover2(
    let recoveryId = body?.recoveryId;
    let userId = body?.userId;
 
-   // For backward compatibility accept userid and recoveryid in url until clients update
-   if (!recoveryId) {
-      recoveryId = resources['recoveryid'];
-   }
-   if (!userId) {
-      userId = resources['userid'];
-   }
-
    if (!validB64(recoveryId)) {
       throw new ParamError('invalid recovery id');
    }
@@ -1608,7 +1600,6 @@ const METHODMAP: MethodMap = {
       { name: 'postRegVerify', pattern: Patterns.regVerify, version: 1, authorize: false, handler: postRegVerify },
       { name: 'postRecover', pattern: Patterns.recover, version: 1, authorize: false, handler: postRecover },
       { name: 'postRecover2', pattern: Patterns.recover2, version: 1, authorize: false, handler: postRecover2 },
-      { name: 'postRecover2Old', pattern: Patterns.recover2Old, version: 1, authorize: false, handler: postRecover2 },
 
       // Internal only endpoints that are not exposed in cloudfront and require special auth
       { name: 'postMunge', pattern: Patterns.munge, version: INTERNAL_VERSION, authorize: false, handler: postMunge },
