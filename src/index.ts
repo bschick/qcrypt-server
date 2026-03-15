@@ -1021,14 +1021,22 @@ async function patchUser(
       throw new ParamError('username must more than 5 and less than 32 character');
    }
 
-   const patched = await Users.patch({
-      userId: verifiedUser.userId
-   }).set({
-      userName: userName
-   }).go();
+   try {
+      const patched = await Users.patch({
+         userId: verifiedUser.userId
+      }).set({
+         userName: userName
+      }).go();
 
-   if (!patched || !patched.data) {
-      throw new ParamError('username update failed');
+      if (!patched || !patched.data) {
+         throw new ParamError('username update failed');
+      }
+   } catch (err) {
+      if (err instanceof ElectroError) {
+         console.error(err);
+         throw new ParamError('username update failed');
+      }
+      throw err;
    }
 
    // Let this happen async
@@ -1372,7 +1380,7 @@ async function getUnverifiedUser(
    }).go();
 
    if (!unverifiedUser || !unverifiedUser.data) {
-      // Autho error are usually generic to attackers cannot use response to
+      // Auth error are usually generic to attackers cannot use response to
       // tell the difference between bad creds, incorrect userid, or no permission
       throw new AuthError();
    }
@@ -1430,10 +1438,10 @@ async function createCookie(verifiedUser: VerifiedUserItem): Promise<string> {
    const token = sign(
       payload,
       jwtKey, {
-      algorithm: 'HS512',
-      expiresIn: expiresIn,
-      issuer: 'quickcrypt'
-   }
+         algorithm: 'HS512',
+         expiresIn: expiresIn,
+         issuer: 'quickcrypt'
+      }
    );
 
    const cookie = `__Host-JWT=${token}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=${expiresIn}`
@@ -1481,9 +1489,9 @@ async function verifyCookie(
       payload = verify(
          token,
          jwtKey, {
-         algorithms: ['HS512'],
-         issuer: 'quickcrypt',
-         complete: false
+            algorithms: ['HS512'],
+            issuer: 'quickcrypt',
+            complete: false
       }) as JwtPayload;
 
       // lastCredentialId is cleared on logout so cookie is invalid after logout
